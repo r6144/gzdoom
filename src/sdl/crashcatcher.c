@@ -384,6 +384,7 @@ static void crash_catcher(int signum, siginfo_t *siginfo, void *context)
 int cc_install_handlers(int num_signals, int *signals, const char *logfile, int (*user_info)(char*, char*))
 {
 	int retval = 0;
+#if 0 // disable it for now
 	struct sigaction sa;
 	memset(&sa, 0, sizeof(sa));
 
@@ -408,6 +409,6 @@ int cc_install_handlers(int num_signals, int *signals, const char *logfile, int 
 		}
 		++signals;
 	}
-
+#endif
 	return retval;
 }
