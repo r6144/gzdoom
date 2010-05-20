@@ -139,6 +139,8 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 // EXTERNAL DATA DECLARATIONS ----------------------------------------------
 
 EXTERN_CVAR (Float, turbo)
+EXTERN_CVAR (Int, damage_divisor)
+EXTERN_CVAR (Int, crosshair)
 EXTERN_CVAR (Bool, freelook)
 EXTERN_CVAR (Float, m_pitch)
 EXTERN_CVAR (Float, m_yaw)
@@ -1994,6 +1996,13 @@ void D_DoomMain (void)
 		double amt = atof(v);
 		Printf ("turbo scale: %.0f%%\n", amt);
 		turbo = (float)amt;
+	}
+
+	v = Args->CheckValue("-easy");
+	if (v != NULL)
+	{ // easiness option
+		damage_divisor = atoi(v);
+		Printf ("damage divisor: %d\n", (int) damage_divisor);
 	}
 
 	v = Args->CheckValue ("-timer");

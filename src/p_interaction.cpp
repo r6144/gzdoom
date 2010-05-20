@@ -71,6 +71,7 @@ CVAR (Bool, cl_showsprees, true, CVAR_ARCHIVE)
 CVAR (Bool, cl_showmultikills, true, CVAR_ARCHIVE)
 EXTERN_CVAR (Bool, show_obituaries)
 
+CVAR (Int, damage_divisor, 1, 0)
 
 FName MeansOfDeath;
 bool FriendlyFire;
@@ -859,6 +860,19 @@ void P_AutoUseStrifeHealth (player_t *player)
 	}
 }
 
+static int divide_damage(int damage)
+{
+	unsigned divisor = damage_divisor;
+	if (divisor != 1)
+	{
+		int x = damage / divisor, y = damage % divisor;
+		int limit = y * 256 / divisor;
+		if (pr_damagemobj() < limit) x += 1;
+		damage = x;
+	}
+	return damage;
+}
+
 /*
 =================
 =
@@ -1102,6 +1116,7 @@ void P_DamageMobj (AActor *target, AActor *inflictor, AActor *source, int damage
 	//
 	if (player)
 	{
+		damage = divide_damage(damage); // easiness
 		
         //Added by MC: Lets bots look allround for enemies if they survive an ambush.
         if (player->isbot)
@@ -1480,6 +1495,7 @@ void P_PoisonDamage (player_t *player, AActor *source, int damage,
 		// Take half damage in trainer mode
 		damage = FixedMul(damage, G_SkillProperty(SKILLP_DamageFactor));
 	}
+	if (player) damage = divide_damage(damage); // easiness
 	if (damage >= player->health
 		&& (G_SkillProperty(SKILLP_AutoUseHealth) || deathmatch)
 		&& !player->morphTics)
