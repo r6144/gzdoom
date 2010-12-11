@@ -80,11 +80,11 @@ CCMD (toggleconsole)
 	C_ToggleConsole();
 }
 
-bool CheckCheatmode ()
+bool CheckCheatmode (bool printmsg)
 {
 	if ((G_SkillProperty(SKILLP_DisableCheats) || netgame || deathmatch) && (!sv_cheats))
 	{
-		Printf ("sv_cheats must be true to enable this command.\n");
+		if (printmsg) Printf ("sv_cheats must be true to enable this command.\n");
 		return true;
 	}
 	else
@@ -935,4 +935,5 @@ CCMD(currentpos)
 	Printf("Current player position: (%1.3f,%1.3f,%1.3f), angle: %1.3f, floorheight: %1.3f, sector:%d, lightlevel: %d\n",
 		FIXED2FLOAT(mo->x), FIXED2FLOAT(mo->y), FIXED2FLOAT(mo->z), mo->angle/float(ANGLE_1), FIXED2FLOAT(mo->floorz), mo->Sector->sectornum, mo->Sector->lightlevel);
 }
+
 

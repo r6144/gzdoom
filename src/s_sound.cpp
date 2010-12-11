@@ -49,6 +49,7 @@
 #include "templates.h"
 #include "timidity/timidity.h"
 #include "g_level.h"
+#include "po_man.h"
 
 // MACROS ------------------------------------------------------------------
 
@@ -323,7 +324,7 @@ void S_InitData ()
 	LastLocalSndInfo = LastLocalSndSeq = "";
 	S_ParseSndInfo ();
 	S_ParseSndSeq (-1);
-	S_ParseReverbDef ();
+	S_ParseMusInfo();
 }
 
 //==========================================================================
@@ -795,11 +796,11 @@ static void CalcSectorSoundOrg(const sector_t *sec, int channum, fixed_t *x, fix
 
 static void CalcPolyobjSoundOrg(const FPolyObj *poly, fixed_t *x, fixed_t *y, fixed_t *z)
 {
-	seg_t *seg;
+	side_t *side;
 	sector_t *sec;
 
-	PO_ClosestPoint(poly, *x, *y, *x, *y, &seg);
-	sec = seg->frontsector;
+	poly->ClosestPoint(*x, *y, *x, *y, &side);
+	sec = side->sector;
 	*z = clamp(*z, sec->floorplane.ZatPoint(*x, *y), sec->ceilingplane.ZatPoint(*x, *y));
 }
 
@@ -826,7 +827,7 @@ static FSoundChan *S_StartSound(AActor *actor, const sector_t *sec, const FPolyO
 	FVector3 pos, vel;
 	FRolloffInfo *rolloff;
 
-	if (sound_id <= 0 || volume <= 0)
+	if (sound_id <= 0 || volume <= 0 || nosfx)
 		return NULL;
 
 	int type;
@@ -2328,7 +2329,8 @@ bool S_ChangeMusic (const char *musicname, int order, bool looping, bool force)
 		// Don't choke if the map doesn't have a song attached
 		S_StopMusic (true);
 		mus_playing.name = "";
-		return false;
+		LastSong = "";
+		return true;
 	}
 
 	FString DEH_Music;
@@ -2616,15 +2618,27 @@ CCMD (idmus)
 
 CCMD (changemus)
 {
-	if (argv.argc() > 1)
-	{
-		if (PlayList)
-		{
-			delete PlayList;
-			PlayList = NULL;
-		}
-		S_ChangeMusic (argv[1], argv.argc() > 2 ? atoi (argv[2]) : 0);
-	}
+   if (argv.argc() > 1)
+   {
+      if (PlayList)
+      {
+         delete PlayList;
+         PlayList = NULL;
+      }
+      S_ChangeMusic (argv[1], argv.argc() > 2 ? atoi (argv[2]) : 0);
+   }
+   else
+   {
+      const char *currentmus = mus_playing.name.GetChars();
+      if(currentmus != NULL && *currentmus != 0)
+      {
+         Printf ("currently playing %s\n", currentmus);
+      }
+      else
+      {
+         Printf ("no music playing\n");
+      }
+   }
 }
 
 //==========================================================================

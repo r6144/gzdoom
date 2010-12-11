@@ -347,7 +347,7 @@ static bool P_LoadBloodMap (BYTE *data, size_t len, FMapThing **mapthings, int *
 		data += sizeof(spritetype);
 		if (bspr[i].extra > 0)	// copy Xsprite
 		{
-			assert(sizeof Xsprite == 56);
+			assert(sizeof(Xsprite) == 56);
 			memcpy(&xspr[i], data, sizeof(Xsprite));
 			data += sizeof(Xsprite);
 		}
@@ -432,6 +432,7 @@ static void LoadSectors (sectortype *bsec)
 		sec->lightlevel = (sec->GetPlaneLight(sector_t::floor) + sec->GetPlaneLight(sector_t::ceiling)) / 2;
 
 		sec->seqType = -1;
+		sec->SeqName = NAME_None;
 		sec->nextsec = -1;
 		sec->prevsec = -1;
 		sec->gravity = 1.f;

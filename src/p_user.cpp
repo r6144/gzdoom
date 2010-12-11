@@ -52,6 +52,7 @@
 #include "thingdef/thingdef.h"
 #include "g_level.h"
 #include "d_net.h"
+#include "gstrings.h"
 
 static FRandom pr_skullpop ("SkullPop");
 
@@ -95,40 +96,56 @@ bool FPlayerClass::CheckSkin (int skin)
 	return false;
 }
 
+//===========================================================================
+//
+// GetDisplayName
+//
+//===========================================================================
+
+const char *GetPrintableDisplayName(const PClass *cls)
+{ 
+	// Fixme; This needs a decent way to access the string table without creating a mess.
+	const char *name = cls->Meta.GetMetaString(APMETA_DisplayName);
+	return name;
+}
+
+bool ValidatePlayerClass(const PClass *ti, const char *name)
+{
+	if (!ti)
+	{
+		Printf ("Unknown player class '%s'\n", name);
+		return false;
+	}
+	else if (!ti->IsDescendantOf (RUNTIME_CLASS (APlayerPawn)))
+	{
+		Printf ("Invalid player class '%s'\n", name);
+		return false;
+	}
+	else if (ti->Meta.GetMetaString (APMETA_DisplayName) == NULL)
+	{
+		Printf ("Missing displayname for player class '%s'\n", name);
+		return false;
+	}
+	return true;
+}
+
 void SetupPlayerClasses ()
 {
 	FPlayerClass newclass;
 
-	newclass.Flags = 0;
+	for (unsigned i=0; i<gameinfo.PlayerClasses.Size(); i++)
+	{
+		newclass.Flags = 0;
+		newclass.Type = PClass::FindClass(gameinfo.PlayerClasses[i]);
 
-	if (gameinfo.gametype == GAME_Doom)
-	{
-		newclass.Type = PClass::FindClass (NAME_DoomPlayer);
-		PlayerClasses.Push (newclass);
-	}
-	else if (gameinfo.gametype == GAME_Heretic)
-	{
-		newclass.Type = PClass::FindClass (NAME_HereticPlayer);
-		PlayerClasses.Push (newclass);
-	}
-	else if (gameinfo.gametype == GAME_Hexen)
-	{
-		newclass.Type = PClass::FindClass (NAME_FighterPlayer);
-		PlayerClasses.Push (newclass);
-		newclass.Type = PClass::FindClass (NAME_ClericPlayer);
-		PlayerClasses.Push (newclass);
-		newclass.Type = PClass::FindClass (NAME_MagePlayer);
-		PlayerClasses.Push (newclass);
-	}
-	else if (gameinfo.gametype == GAME_Strife)
-	{
-		newclass.Type = PClass::FindClass (NAME_StrifePlayer);
-		PlayerClasses.Push (newclass);
-	}
-	else if (gameinfo.gametype == GAME_Chex)
-	{
-		newclass.Type = PClass::FindClass (NAME_ChexPlayer);
-		PlayerClasses.Push (newclass);
+		if (ValidatePlayerClass(newclass.Type, gameinfo.PlayerClasses[i]))
+		{
+			if ((GetDefaultByType(newclass.Type)->flags6 & MF6_NOMENU))
+			{
+				newclass.Flags |= PCF_NOMENU;
+			}
+			PlayerClasses.Push (newclass);
+		}
 	}
 }
 
@@ -146,19 +163,7 @@ CCMD (addplayerclass)
 	{
 		const PClass *ti = PClass::FindClass (argv[1]);
 
-		if (!ti)
-		{
-			Printf ("Unknown player class '%s'\n", argv[1]);
-		}
-		else if (!ti->IsDescendantOf (RUNTIME_CLASS (APlayerPawn)))
-		{
-			Printf ("Invalid player class '%s'\n", argv[1]);
-		}
-		else if (ti->Meta.GetMetaString (APMETA_DisplayName) == NULL)
-		{
-			Printf ("Missing displayname for player class '%s'\n", argv[1]);
-		}
-		else
+		if (ValidatePlayerClass(ti, argv[1]))
 		{
 			FPlayerClass newclass;
 
@@ -189,7 +194,8 @@ CCMD (playerclasses)
 {
 	for (unsigned int i = 0; i < PlayerClasses.Size (); i++)
 	{
-		Printf ("% 3d %s\n", i,
+		Printf ("%3d: Class = %s, Name = %s\n", i,
+			PlayerClasses[i].Type->TypeName.GetChars(),
 			PlayerClasses[i].Type->Meta.GetMetaString (APMETA_DisplayName));
 	}
 }
@@ -376,17 +382,17 @@ void player_t::SetLogNumber (int num)
 		data[length]=0;
 		SetLogText (data);
 		delete[] data;
-
-		// Print log text to console
-		AddToConsole(-1, TEXTCOLOR_GOLD);
-		AddToConsole(-1, LogText);
-		AddToConsole(-1, "\n");
 	}
 }
 
 void player_t::SetLogText (const char *text)
 {
 	LogText = text;
+
+	// Print log text to console
+	AddToConsole(-1, TEXTCOLOR_GOLD);
+	AddToConsole(-1, LogText);
+	AddToConsole(-1, "\n");
 }
 
 int player_t::GetSpawnClass()
@@ -426,6 +432,10 @@ void APlayerPawn::Serialize (FArchive &arc)
 		<< MorphWeapon
 		<< DamageFade
 		<< PlayerFlags;
+	if (SaveVersion < 2435)
+	{
+		DamageFade.a = 255;
+	}
 }
 
 //===========================================================================
@@ -499,6 +509,15 @@ void APlayerPawn::Tick()
 void APlayerPawn::PostBeginPlay()
 {
 	SetupWeaponSlots();
+
+	// Voodoo dolls: restore original floorz/ceilingz logic
+	if (player == NULL || player->mo != this)
+	{
+		dropoffz = floorz = Sector->floorplane.ZatPoint(x, y);
+		ceilingz = Sector->ceilingplane.ZatPoint(x, y);
+		P_FindFloorCeiling(this, true);
+		z = floorz;
+	}
 }
 
 //===========================================================================
@@ -1962,7 +1981,7 @@ void P_CrouchMove(player_t * player, int direction)
 
 	// check whether the move is ok
 	player->mo->height = FixedMul(defaultheight, player->crouchfactor);
-	if (!P_TryMove(player->mo, player->mo->x, player->mo->y, false, false))
+	if (!P_TryMove(player->mo, player->mo->x, player->mo->y, false, NULL))
 	{
 		player->mo->height = savedheight;
 		if (direction > 0)
@@ -2041,7 +2060,7 @@ void P_PlayerThink (player_t *player)
 		player->inventorytics--;
 	}
 	// No-clip cheat
-	if (player->cheats & CF_NOCLIP)
+	if (player->cheats & CF_NOCLIP || (player->mo->GetDefault()->flags & MF_NOCLIP))
 	{
 		player->mo->flags |= MF_NOCLIP;
 	}

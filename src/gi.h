@@ -43,6 +43,10 @@
 #define GI_MENUHACK_EXTENDED	0x00000004	// (Heretic)
 #define GI_TEASER2				0x00000008	// Alternate version of the Strife Teaser
 #define GI_COMPATSHORTTEX		0x00000010	// always force COMPAT_SHORTTEX for IWAD maps.
+#define GI_COMPATSTAIRS			0x00000020	// same for stairbuilding
+#define GI_COMPATPOLY1			0x00000040	// Hexen's MAP36 needs old polyobject drawing
+#define GI_COMPATPOLY2			0x00000080	// so does HEXDD's MAP47
+#define GI_NOTEXTCOLOR			0x00000100
 
 #include "gametype.h"
 
@@ -71,10 +75,12 @@ struct gameinfo_t
 	bool drawreadthis;
 	bool noloopfinalemusic;
 	bool intermissioncounter;
+	bool nightmarefast;
 	TArray<FName> creditPages;
 	TArray<FName> finalePages;
 	TArray<FName> infoPages;
 	TArray<FName> DefaultWeaponSlots[10];
+	TArray<FName> PlayerClasses;
 
 	FString titleMusic;
 	float titleTime;
@@ -87,6 +93,7 @@ struct gameinfo_t
 	char SkyFlatName[9];
 	char ArmorIcon1[9];
 	char ArmorIcon2[9];
+	char PauseSign[9];
 	char Endoom[9];
 	fixed_t Armor2Percent;
 	FString quitSound;
@@ -105,6 +112,17 @@ struct gameinfo_t
 	int defaultrespawntime;
 	int defaultdropstyle;
 	int player5start;
+	DWORD pickupcolor;
+	TArray<FString> quitmessages;
+	FName mTitleColor;
+	FName mFontColor;
+	FName mFontColorValue;
+	FName mFontColorMore;
+	FName mFontColorHeader;
+	FName mFontColorHighlight;
+	FName mFontColorSelection;
+	char mBackButton[9];
+	fixed_t gibfactor;
 
 	const char *GetFinalePage(unsigned int num) const;
 };

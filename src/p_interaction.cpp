@@ -319,20 +319,10 @@ void ClientObituary (AActor *self, AActor *inflictor, AActor *attacker)
 //
 EXTERN_CVAR (Int, fraglimit)
 
-static int GibHealth(AActor *actor)
-{	
-	return -abs(
-		actor->GetClass()->Meta.GetMetaInt (
-			AMETA_GibHealth,
-			gameinfo.gametype & GAME_DoomChex ?
-				-actor->SpawnHealth() :
-				-actor->SpawnHealth()/2));		
-}
-
 void AActor::Die (AActor *source, AActor *inflictor)
 {
 	// Handle possible unmorph on death
-	bool wasgibbed = (health < GibHealth(this));
+	bool wasgibbed = (health < GibHealth());
 
 	AActor *realthis = NULL;
 	int realstyle = 0;
@@ -343,7 +333,7 @@ void AActor::Die (AActor *source, AActor *inflictor)
 		{
 			if (wasgibbed)
 			{
-				int realgibhealth = GibHealth(realthis);
+				int realgibhealth = realthis->GibHealth();
 				if (realthis->health >= realgibhealth)
 				{
 					realthis->health = realgibhealth -1; // if morphed was gibbed, so must original be (where allowed)
@@ -671,7 +661,7 @@ void AActor::Die (AActor *source, AActor *inflictor)
 	{
 		int flags4 = inflictor == NULL ? 0 : inflictor->flags4;
 
-		int gibhealth = GibHealth(this);
+		int gibhealth = GibHealth();
 		
 		// Don't pass on a damage type this actor cannot handle.
 		// (most importantly, prevent barrels from passing on ice damage.)
@@ -1384,6 +1374,34 @@ dopain:
 		target->flags |= MF_JUSTHIT;    // fight back!
 }
 
+void P_PoisonMobj (AActor *target, AActor *inflictor, AActor *source, int damage, int duration, int period)
+{
+	int olddamage = target->PoisonDamageReceived;
+	int oldduration = target->PoisonDurationReceived;
+
+	target->Poisoner = source;
+
+	if (inflictor->flags6 & MF6_ADDITIVEPOISONDAMAGE)
+	{
+		target->PoisonDamageReceived += damage;
+	}
+	else
+	{
+		target->PoisonDamageReceived = damage;
+	}
+
+	if (inflictor->flags6 & MF6_ADDITIVEPOISONDURATION)
+	{
+		target->PoisonDurationReceived += duration;
+	}
+	else
+	{
+		target->PoisonDurationReceived = duration;
+	}
+
+	target->PoisonPeriodReceived = period;
+}
+
 bool AActor::OkayToSwitchTarget (AActor *other)
 {
 	if (other == this)
@@ -1555,7 +1573,6 @@ void P_PoisonDamage (player_t *player, AActor *source, int damage,
 	return;
 }
 
-bool CheckCheatmode ();
 
 CCMD (kill)
 {

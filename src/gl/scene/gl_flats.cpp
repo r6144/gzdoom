@@ -112,7 +112,8 @@ void GLFlat::DrawSubsectorLights(subsector_t * sub, int pass)
 	Plane p;
 	Vector nearPt, up, right, t1;
 	float scale;
-	int k, v;
+	int k;
+	seg_t *v;
 
 	FLightNode * node = sub->lighthead[pass==GLPASS_LIGHT_ADDITIVE];
 	gl_RenderState.Apply(true);
@@ -148,7 +149,7 @@ void GLFlat::DrawSubsectorLights(subsector_t * sub, int pass)
 		gl.Begin(GL_TRIANGLE_FAN);
 		for(k = 0, v = sub->firstline; k < sub->numlines; k++, v++)
 		{
-			vertex_t *vt = segs[v].v1;
+			vertex_t *vt = v->v1;
 			float zc = plane.plane.ZatPoint(vt->fx, vt->fy) + dz;
 
 			t1.Set(vt->fx, zc, vt->fy);
@@ -236,7 +237,7 @@ void GLFlat::DrawSubsector(subsector_t * sub)
 
 	for(int k=0; k<sub->numlines; k++)
 	{
-		vertex_t *vt = segs[sub->firstline+k].v1;
+		vertex_t *vt = sub->firstline[k].v1;
 		gl.TexCoord2f(vt->fx/64.f, -vt->fy/64.f);
 		float zc = plane.plane.ZatPoint(vt->fx, vt->fy) + dz;
 		gl.Vertex3f(vt->fx, zc, vt->fy);
@@ -330,7 +331,7 @@ void GLFlat::Draw(int pass)
 
 #ifdef _MSC_VER
 #ifdef _DEBUG
-	if (sector->sectornum == 0)
+	if (sector->sectornum == 2)
 		__asm nop
 #endif
 #endif
@@ -470,7 +471,7 @@ inline void GLFlat::PutFlat(bool fog)
 
 		if (!gl_fixedcolormap)
 		{
-			foggy = !gl_isBlack (Colormap.FadeColor) || level.flags&LEVEL_HASFADETABLE;
+			foggy = gl_CheckFog(sector, NULL) || level.flags&LEVEL_HASFADETABLE;
 
 			if (gl_lights && !gl_dynlight_shader && GLRenderer->mLightCount)	// Are lights touching this sector?
 			{
@@ -498,9 +499,9 @@ inline void GLFlat::PutFlat(bool fog)
 //
 //==========================================================================
 
-void GLFlat::Process(sector_t * sector, int whichplane, bool fog)
+void GLFlat::Process(sector_t * model, int whichplane, bool fog)
 {
-	plane.GetFromSector(sector, whichplane);
+	plane.GetFromSector(model, whichplane);
 
 	if (!fog)
 	{
@@ -589,7 +590,7 @@ void GLFlat::ProcessSector(sector_t * frontsector, subsector_t * sub)
 
 	gl_drawinfo->ss_renderflags[sub-subsectors]|=SSRF_PROCESSED;
 	if (sub->hacked&1) gl_drawinfo->AddHackedSubsector(sub);
-	if (sub->degenerate) return;
+	if (sub->flags & SSECF_DEGENERATE) return;
 
 	byte * srf = &gl_drawinfo->sectorrenderflags[sector->sectornum];
 

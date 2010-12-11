@@ -6,13 +6,21 @@ endif( COMMAND cmake_policy )
 
 include( CheckCXXSourceCompiles )
 include( CheckFunctionExists )
+include( CheckCXXCompilerFlag )
 include( FindPkgConfig )
 include( FindOpenGL )
 
 option( NO_ASM "Disable assembly code" )
 if( CMAKE_COMPILER_IS_GNUCXX )
 	option( NO_STRIP "Do not strip Release or MinSizeRel builds" )
+	# At least some versions of Xcode fail if you strip with the linker
+	# instead of the separate strip utility.
+	if( APPLE )
+		set( NO_STRIP ON )
+	endif( APPLE )
 endif( CMAKE_COMPILER_IS_GNUCXX )
+
+option( DYN_FLUIDSYNTH "Dynamically load fluidsynth" )
 
 if( CMAKE_SIZEOF_VOID_P MATCHES "8" )
 	set( X64 64 )
@@ -26,6 +34,10 @@ endif( CMAKE_SIZEOF_VOID_P MATCHES "8" )
 #   fmodapi<version>linux[64] -or simply- fmod
 #   jpeg-6b
 #   ...
+# The recommended method is to put it in the zdoom tree, since its
+# headers are unversioned. Especially now that we can't work properly
+# with anything newer than 4.26.xx, you probably don't want to use
+# a system-wide version.
 
 # Construct version numbers for searching for the FMOD library on Linux.
 set( MINOR_VERSIONS "50" "49" "48" "47" "46" "45" "44" "43" "42" "41"
@@ -33,7 +45,7 @@ set( MINOR_VERSIONS "50" "49" "48" "47" "46" "45" "44" "43" "42" "41"
 	"27" "26" "25" "24" "23" "22" "21" "20" "21" "19" "18" "17" "16"
 	"15" "14" "13" "12" "11" "10" "09" "08" "07" "06" "05" "04" "03"
 	"02" "01" "00" )
-set( MAJOR_VERSIONS "26" "24" "22" "20" )
+set( MAJOR_VERSIONS "30" "28" "26" "24" "22" "20" )
 set( FMOD_DIR_VERSIONS ${FMOD_DIR_VERSIONS} "../fmod" )
 foreach( majver ${MAJOR_VERSIONS} )
 	foreach( minver ${MINOR_VERSIONS} )
@@ -246,14 +258,11 @@ else( FMOD_LIBRARY )
 endif( FMOD_LIBRARY )
 
 
-# Search for NASM
+# Search for FluidSynth
 
-if( CMAKE_SYSTEM_PROCESSOR MATCHES powerpc )
-	if( NOT NO_ASM )
-		message( STATUS "Disabling assembly code for PowerPC." )
-		set( NO_ASM ON )
-	endif( NOT NO_ASM )
-endif( CMAKE_SYSTEM_PROCESSOR MATCHES powerpc )
+include( ../FindFluidSynth.cmake )
+
+# Search for NASM
 
 if( NOT NO_ASM )
 	if( UNIX AND X64 )
@@ -313,7 +322,12 @@ if( NOT NO_ASM )
 			set( ASM_FLAGS )
 			set( ASM_SOURCE_EXTENSION .s )
 		else( X64 )
-			set( ASM_FLAGS -f elf -DM_TARGET_LINUX -i${CMAKE_CURRENT_SOURCE_DIR}/ )
+			if( APPLE )
+				set( ASM_FLAGS -fmacho -DM_TARGET_MACHO )
+			else( APPLE )
+				set( ASM_FLAGS -felf -DM_TARGET_LINUX )
+			endif( APPLE )
+			set( ASM_FLAGS "${ASM_FLAGS}" -i${CMAKE_CURRENT_SOURCE_DIR}/ )
 			set( ASM_SOURCE_EXTENSION .asm )
 		endif( X64 )
 	else( UNIX )
@@ -343,9 +357,52 @@ if( NOT NO_ASM )
 	ENDMACRO( ADD_ASM_FILE )
 endif( NOT NO_ASM )
 
+# Decide on SSE setup
+
+set( SSE_MATTERS NO )
+
+# SSE only matters on 32-bit targets. We check compiler flags to know if we can do it.
+if( CMAKE_SIZEOF_VOID_P MATCHES "4" )
+	CHECK_CXX_COMPILER_FLAG( "-msse2 -mfpmath=sse" CAN_DO_MFPMATH )
+	CHECK_CXX_COMPILER_FLAG( -arch:SSE2 CAN_DO_ARCHSSE2 )
+	if( CAN_DO_MFPMATH )
+		set( SSE1_ENABLE "-msse -mfpmath=sse" )
+		set( SSE2_ENABLE "-msse2 -mfpmath=sse" )
+		set( SSE_MATTERS YES )
+	elseif( CAN_DO_ARCHSSE2 )
+		set( SSE1_ENABLE -arch:SSE )
+		set( SSE2_ENABLE -arch:SSE2 )
+		set( SSE_MATTERS YES )
+	endif( CAN_DO_MFPMATH )
+endif( CMAKE_SIZEOF_VOID_P MATCHES "4" )
+
+if( SSE_MATTERS )
+	if( WIN32 )
+		set( BACKPATCH 1 CACHE BOOL "Enable backpatching." )
+	else( WIN32 )
+		CHECK_FUNCTION_EXISTS(mprotect HAVE_MPROTECT)
+		if( HAVE_MPROTECT )
+			set( BACKPATCH 1 CACHE BOOL "Enable backpatching." )
+		else( HAVE_MPROTECT )
+			set( BACKPATCH 0 )
+		endif( HAVE_MPROTECT )
+	endif( WIN32 )
+	set( SSE 1 CACHE BOOL "Build SSE and SSE2 versions of key code." )
+else( SSE_MATTERS )
+	set( BACKPATCH 0 )
+endif( SSE_MATTERS )
+
 # Set up flags for GCC
 
 if( CMAKE_COMPILER_IS_GNUCXX )
+	if( PROFILE )
+		set( CMAKE_C_FLinclude( FindFluidSynth.cmake )
+AGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -pg" )
+		set( CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -pg" )
+		set( CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} -pg" )
+		set( CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -pg" )
+	endif( PROFILE )
+	
 	set( REL_CXX_FLAGS "-fno-rtti" )
 	if( NOT PROFILE )
 		set( REL_CXX_FLAGS "${REL_CXX_FLAGS} -fomit-frame-pointer" )
@@ -391,6 +448,13 @@ if( NOT STRNICMP_EXISTS )
 	add_definitions( -Dstrnicmp=strncasecmp )
 endif( NOT STRNICMP_EXISTS )
 
+if( NOT WIN32 )
+	CHECK_FUNCTION_EXISTS( sigtimedwait SIGTIMEDWAIT_EXISTS )
+	if( SIGTIMEDWAIT_EXISTS )
+		add_definitions( -DHAVE_SIGTIMEDWAIT )
+	endif( SIGTIMEDWAIT_EXISTS )
+endif( NOT WIN32)
+
 if( NOT MSVC )
 	add_definitions( -D__forceinline=inline )
 endif( NOT MSVC )
@@ -424,6 +488,12 @@ if( NOT HAS_VA_COPY )
 	endif( HAS___VA_COPY )
 endif( NOT HAS_VA_COPY )
 
+# Flags
+
+if( BACKPATCH )
+	add_definitions( -DBACKPATCH )
+endif( BACKPATCH )
+
 # Update svnrevision.h
 
 add_custom_target( revision_check ALL
@@ -433,8 +503,16 @@ add_custom_target( revision_check ALL
 
 # Libraries ZDoom needs
 
+message( STATUS "Fluid synth libs: ${FLUIDSYNTH_LIBRARIES}" )
 set( ZDOOM_LIBS ${ZDOOM_LIBS} "${ZLIB_LIBRARIES}" "${JPEG_LIBRARIES}" "${BZIP2_LIBRARIES}" "${FMOD_LIBRARY}" )
 include_directories( "${ZLIB_INCLUDE_DIR}" "${JPEG_INCLUDE_DIR}" "${FMOD_INCLUDE_DIR}" "${BZIP2_INCLUDE_DIR}" "${LZMA_INCLUDE_DIR}" )
+
+if( FLUIDSYNTH_FOUND )
+  if( NOT DYN_FLUIDSYNTH)
+	set( ZDOOM_LIBS ${ZDOOM_LIBS} "${FLUIDSYNTH_LIBRARIES}" )
+	include_directories( "${FLUIDSYNTH_INCLUDE_DIR}" )
+  endif( NOT DYN_FLUIDSYNTH )
+endif( FLUIDSYNTH_FOUND )
 
 # Start defining source files for ZDoom
 
@@ -484,7 +562,7 @@ else( WIN32 )
 		sdl/sdlvideo.cpp
 		sdl/st_start.cpp )
 	if( APPLE )
-		set( SYSTEM_SOURCES ${SYSTEM_SOURCES} sdl/SDLMain.m )
+		set( SYSTEM_SOURCES ${SYSTEM_SOURCES} sdl/SDLMain.m sdl/iwadpicker_cocoa.mm )
 	endif( APPLE )
 endif( WIN32 )
 
@@ -519,12 +597,23 @@ add_custom_command( OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/sc_man_scanner.h
 
 include_directories( ${CMAKE_CURRENT_BINARY_DIR} )
 
-if( CMAKE_SYSTEM_PROCESSOR MATCHES powerpc )
+if( SSE_MATTERS )
+	if( SSE )
+		set( X86_SOURCES nodebuild_classify_sse2.cpp )
+		set_source_files_properties( nodebuild_classify_sse2.cpp PROPERTIES COMPILE_FLAGS "${SSE2_ENABLE}" )
+	else( SSE )
+		add_definitions( -DDISABLE_SSE )
+	endif( SSE )
+else( SSE_MATTERS )
+	add_definitions( -DDISABLE_SSE )
 	set( X86_SOURCES )
-	set( NOT_X86 ON )
-else( CMAKE_SYSTEM_PROCESSOR MATCHES powerpc )
-	set( X86_SOURCES nodebuild_classify_sse2.cpp )
-endif( CMAKE_SYSTEM_PROCESSOR MATCHES powerpc )
+endif( SSE_MATTERS )
+
+if( DYN_FLUIDSYNTH )
+	add_definitions( -DHAVE_FLUIDSYNTH -DDYN_FLUIDSYNTH )
+elseif( FLUIDSYNTH_FOUND )
+	add_definitions( -DHAVE_FLUIDSYNTH )
+endif( DYN_FLUIDSYNTH )
 
 add_executable( zdoom WIN32
 	autostart.cpp
@@ -578,19 +667,17 @@ add_executable( zdoom WIN32
 	hu_scores.cpp
 	i_net.cpp
 	info.cpp
+	keysections.cpp
 	lumpconfigfile.cpp
 	m_alloc.cpp
 	m_argv.cpp
 	m_bbox.cpp
 	m_cheat.cpp
 	m_joy.cpp
-	m_menu.cpp
 	m_misc.cpp
-	m_options.cpp
 	m_png.cpp
 	m_random.cpp
 	md5.cpp
-	mus2midi.cpp
 	name.cpp
 	nodebuild.cpp
 	nodebuild_classify_nosse2.cpp
@@ -608,6 +695,7 @@ add_executable( zdoom WIN32
 	p_effect.cpp
 	p_enemy.cpp
 	p_floor.cpp
+	p_glnodes.cpp
 	p_interaction.cpp
 	p_lights.cpp
 	p_linkedsectors.cpp
@@ -632,6 +720,7 @@ add_executable( zdoom WIN32
 	p_tick.cpp
 	p_trace.cpp
 	p_udmf.cpp
+	p_usdf.cpp
 	p_user.cpp
 	p_writemap.cpp
 	p_xlat.cpp
@@ -657,8 +746,10 @@ add_executable( zdoom WIN32
 	s_sound.cpp
 	sc_man.cpp
 	st_stuff.cpp
+	statistics.cpp
 	stats.cpp
 	stringtable.cpp
+	strnatcmp.c
 	tables.cpp
 	teaminfo.cpp
 	tempfiles.cpp
@@ -675,9 +766,7 @@ add_executable( zdoom WIN32
 	zstring.cpp
 	g_doom/a_doommisc.cpp
 	g_heretic/a_hereticmisc.cpp
-	g_heretic/heretic_sbar.cpp
 	g_hexen/a_hexenmisc.cpp
-	g_hexen/hexen_sbar.cpp
 	g_raven/a_artitele.cpp
 	g_raven/a_minotaur.cpp
 	g_strife/a_strifestuff.cpp
@@ -718,8 +807,20 @@ add_executable( zdoom WIN32
 	g_shared/sbar_mugshot.cpp
 	g_shared/shared_hud.cpp
 	g_shared/shared_sbar.cpp
+	menu/colorpickermenu.cpp
+	menu/joystickmenu.cpp
+	menu/listmenu.cpp
+	menu/loadsavemenu.cpp
+	menu/menu.cpp
+	menu/menudef.cpp
+	menu/menuinput.cpp
+	menu/messagebox.cpp
+	menu/optionmenu.cpp
+	menu/playerdisplay.cpp
+	menu/playermenu.cpp
+	menu/readthis.cpp
+	menu/videomenu.cpp
 	gl/data/gl_sections.cpp
-	gl/data/gl_nodes.cpp
 	gl/data/gl_data.cpp
 	gl/data/gl_portaldata.cpp
 	gl/data/gl_setup.cpp
@@ -793,13 +894,16 @@ add_executable( zdoom WIN32
 	sound/music_cd.cpp
 	sound/music_dumb.cpp
 	sound/music_gme.cpp
+	sound/music_mus_midiout.cpp
+	sound/music_smf_midiout.cpp
+	sound/music_hmi_midiout.cpp
 	sound/music_midistream.cpp
 	sound/music_midi_base.cpp
-	sound/music_midi_midiout.cpp
 	sound/music_midi_timidity.cpp
-	sound/music_mus_midiout.cpp
 	sound/music_mus_opl.cpp
 	sound/music_stream.cpp
+	sound/music_fluidsynth_mididevice.cpp
+	sound/music_softsynth_mididevice.cpp
 	sound/music_timidity_mididevice.cpp
 	sound/music_win_mididevice.cpp
 	textures/automaptexture.cpp
@@ -895,21 +999,12 @@ if( NOT WIN32 )
 		COMMAND chmod +x ${CMAKE_CURRENT_BINARY_DIR}/link-make
 		COMMAND /bin/sh -c ${CMAKE_CURRENT_BINARY_DIR}/link-make )
 endif( NOT WIN32 )
-
 if( CMAKE_COMPILER_IS_GNUCXX )
 	# GCC misoptimizes this file
 	set_source_files_properties( oplsynth/fmopl.cpp PROPERTIES COMPILE_FLAGS "-fno-tree-dominator-opts -fno-tree-fre" )
-	
-	# Compile this one file with SSE2 support.
-	set_source_files_properties( nodebuild_classify_sse2.cpp PROPERTIES COMPILE_FLAGS "-msse2 -mfpmath=sse" )
 
 	# Need to enable intrinsics for this file.
-	if( NOT NOT_X86 )
+	if( SSE_MATTERS )
 		set_source_files_properties( x86.cpp PROPERTIES COMPILE_FLAGS "-msse2 -mmmx" )
-	endif( NOT NOT_X86 )
+	endif( SSE_MATTERS )
 endif( CMAKE_COMPILER_IS_GNUCXX )
-
-if( MSVC )
-	# Compile this one file with SSE2 support.
-	set_source_files_properties( nodebuild_classify_sse2.cpp PROPERTIES COMPILE_FLAGS "/arch:SSE2" )
-endif( MSVC )

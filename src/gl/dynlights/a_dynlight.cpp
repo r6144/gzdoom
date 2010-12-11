@@ -95,10 +95,7 @@ void AVavoomLight::BeginPlay ()
 
 void AVavoomLightWhite::BeginPlay ()
 {
-	BYTE l_args[5];
-	memcpy(l_args, args, 5);
-	memset(args, 0, 5);
-	m_intensity[0] = l_args[0]*4;
+	m_intensity[0] = args[0] * 4;
 	args[LIGHT_RED] = 128;
 	args[LIGHT_GREEN] = 128;
 	args[LIGHT_BLUE] = 128;
@@ -111,7 +108,7 @@ void AVavoomLightColor::BeginPlay ()
 	int l_args[5];
 	memcpy(l_args, args, sizeof(l_args));
 	memset(args, 0, 5);
-	m_intensity[0] = l_args[0]*4;
+	m_intensity[0] = l_args[0] * 4;
 	args[LIGHT_RED] = l_args[1] >> 1;
 	args[LIGHT_GREEN] = l_args[2] >> 1;
 	args[LIGHT_BLUE] = l_args[3] >> 1;
@@ -529,7 +526,7 @@ void ADynamicLight::CollectWithinRadius(subsector_t *subSec, float radius)
 
 	for (unsigned int i = 0; i < subSec->numlines; i++)
 	{
-		seg_t * seg = segs + subSec->firstline + i;
+		seg_t * seg = subSec->firstline + i;
 
 		if (seg->sidedef && seg->linedef && seg->linedef->validcount!=::validcount)
 		{
@@ -542,12 +539,17 @@ void ADynamicLight::CollectWithinRadius(subsector_t *subSec, float radius)
 			}
 		}
 
-		if (seg->PartnerSeg && seg->PartnerSeg->Subsector->validcount!=::validcount)
+		seg_t *partner = seg->PartnerSeg;
+		if (partner)
 		{
-			// check distance from x/y to seg and if within radius add PartnerSeg->Subsector (lather/rinse/repeat)
-			if (DistToSeg(seg) <= radius)
+			subsector_t *sub = partner->Subsector();
+			if (sub->validcount!=::validcount)
 			{
-				CollectWithinRadius(seg->PartnerSeg->Subsector, radius);
+				// check distance from x/y to seg and if within radius add opposing subsector (lather/rinse/repeat)
+				if (DistToSeg(seg) <= radius)
+				{
+					CollectWithinRadius(sub, radius);
+				}
 			}
 		}
 	}

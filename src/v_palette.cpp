@@ -118,6 +118,21 @@ CUSTOM_CVAR (Float, Gamma, 1.f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 	}
 }
 
+CCMD (bumpgamma)
+{
+	// [RH] Gamma correction tables are now generated
+	// on the fly for *any* gamma level.
+	// Q: What are reasonable limits to use here?
+
+	float newgamma = Gamma + 0.1f;
+
+	if (newgamma > 3.0)
+		newgamma = 1.0;
+
+	Gamma = newgamma;
+	Printf ("Gamma correction level %g\n", *Gamma);
+}
+
 
 /****************************/
 /* Palette management stuff */
@@ -224,7 +239,7 @@ void FPalette::MakeGoodRemap ()
 				if (new0 > dup)
 				{
 					// Make the lower-numbered entry a copy of color 0. (Just because.)
-					swap (new0, dup);
+					swapvalues (new0, dup);
 				}
 				Remap[0] = new0;
 				Remap[new0] = dup;
@@ -483,12 +498,12 @@ void InitPalette ()
 		{
 			int intensity = (GPalette.BaseColors[c].r * 77 +
 						GPalette.BaseColors[c].g * 143 +
-						GPalette.BaseColors[c].b * 37) / 255;
+						GPalette.BaseColors[c].b * 37) / 256;
 
 			int r = (GPalette.BaseColors[c].r * (31-m) + intensity *m) / 31;
 			int g = (GPalette.BaseColors[c].g * (31-m) + intensity *m) / 31;
 			int b = (GPalette.BaseColors[c].b * (31-m) + intensity *m) / 31;
-			shade[c] = ColorMatcher.Pick (r, g, b);
+			shade[c] = ColorMatcher.Pick(r, g, b);
 		}
 	}
 

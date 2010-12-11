@@ -55,18 +55,18 @@
 				EnableIntrinsicFunctions="true"
 				FavorSizeOrSpeed="1"
 				OmitFramePointers="true"
-				AdditionalIncludeDirectories="src\win32,src\sound,src,zlib,src\g_shared,src\g_doom,src\g_raven,src\g_heretic,src\g_hexen,src\g_strife;flac;jpeg-6b;game-music-emu\gme;gdtoa;bzip2;lzma\C"
-				PreprocessorDefinitions="NDEBUG,WIN32,_WIN32,_WINDOWS,USEASM,NO_MANIFEST,NO_VA_COPY"
+				WholeProgramOptimization="false"
+				AdditionalIncludeDirectories="src\win32;src\sound;src;zlib;src\g_shared;src\g_doom;src\g_raven;src\g_heretic;src\g_hexen;src\g_strife;&quot;jpeg-6b&quot;;game-music-emu\gme;gdtoa;bzip2;lzma\C"
+				PreprocessorDefinitions="NDEBUG,WIN32,_WIN32,_WINDOWS,HAVE_STRUPR,HAVE_FILELENGTH;NO_VA_COPY,BACKPATCH,HAVE_FLUIDSYNTH,DYN_FLUIDSYNTH"
 				StringPooling="true"
+				ExceptionHandling="1"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="true"
-				EnableEnhancedInstructionSet="0"
-				FloatingPointModel="2"
 				ForceConformanceInForLoopScope="true"
 				RuntimeTypeInfo="false"
 				UsePrecompiledHeader="0"
 				PrecompiledHeaderFile=""
-				AssemblerOutput="2"
+				AssemblerOutput="0"
 				AssemblerListingLocation=".\Release/"
 				ObjectFile=".\Release/"
 				ProgramDataBaseFileName=".\Release/"
@@ -91,12 +91,13 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/MACHINE:I386"
-				AdditionalDependencies="gdi32.lib user32.lib comctl32.lib shell32.lib advapi32.lib comdlg32.lib ole32.lib dxguid.lib dsound.lib ddraw.lib dinput8.lib strmiids.lib wsock32.lib winmm.lib fmodex_vc.lib setupapi.lib ws2_32.lib oleaut32.lib opengl32.lib glu32.lib"
+				AdditionalDependencies="gdi32.lib user32.lib comctl32.lib shell32.lib advapi32.lib comdlg32.lib ole32.lib dxguid.lib dsound.lib dinput8.lib strmiids.lib wsock32.lib winmm.lib fmodex_vc.lib setupapi.lib ws2_32.lib oleaut32.lib opengl32.lib glu32.lib"
 				ShowProgress="0"
 				OutputFile="../gzdoom.exe"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
 				IgnoreDefaultLibraryNames=""
+				DelayLoadDLLs="fmodex.dll"
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile="..\gzdoom.pdb"
 				StripPrivateSymbols=""
@@ -108,6 +109,7 @@
 				TerminalServerAware="2"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
+				LinkTimeCodeGeneration="0"
 				SetChecksum="true"
 			/>
 			<Tool
@@ -171,15 +173,13 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				InlineFunctionExpansion="0"
-				AdditionalIncludeDirectories="src\win32,src\sound,src,zlib,src\g_shared,src\g_doom,src\g_raven,src\g_heretic,src\g_hexen,src\g_strife;flac;jpeg-6b;game-music-emu\gme;gdtoa;bzip2;lzma\C"
-				PreprocessorDefinitions="WIN32,_DEBUG,_WIN32,_WINDOWS,USEASM,_CRTDBG_MAP_ALLOC,NO_MANIFEST,NO_VA_COPY"
+				AdditionalIncludeDirectories="src\win32;src\sound;src;zlib;src\g_shared;src\g_doom;src\g_raven;src\g_heretic;src\g_hexen;src\g_strife;&quot;jpeg-6b&quot;;game-music-emu\gme;gdtoa;bzip2;lzma\C"
+				PreprocessorDefinitions="WIN32,_DEBUG,_WIN32,_WINDOWS,_CRTDBG_MAP_ALLOC,HAVE_STRUPR,HAVE_FILELENGTH;NO_VA_COPY,BACKPATCH,HAVE_FLUIDSYNTH,DYN_FLUIDSYNTH"
 				MinimalRebuild="true"
 				RuntimeLibrary="1"
 				EnableFunctionLevelLinking="true"
 				ForceConformanceInForLoopScope="true"
 				PrecompiledHeaderFile=""
-				AssemblerOutput="4"
 				AssemblerListingLocation=".\Debug/"
 				ObjectFile=".\Debug/"
 				ProgramDataBaseFileName=".\Debug/"
@@ -189,6 +189,7 @@
 				DebugInformationFormat="4"
 				CompileAs="0"
 				DisableSpecificWarnings="4996"
+				ForcedIncludeFiles=""
 			/>
 			<Tool
 				Name="VCManagedResourceCompilerTool"
@@ -204,12 +205,13 @@
 			<Tool
 				Name="VCLinkerTool"
 				AdditionalOptions="/MACHINE:I386"
-				AdditionalDependencies="gdi32.lib user32.lib comctl32.lib shell32.lib advapi32.lib comdlg32.lib ole32.lib dxguid.lib dsound.lib ddraw.lib dinput8.lib strmiids.lib wsock32.lib winmm.lib fmodex_vc.lib setupapi.lib ws2_32.lib opengl32.lib glu32.lib oleaut32.lib"
+				AdditionalDependencies="gdi32.lib user32.lib comctl32.lib shell32.lib advapi32.lib comdlg32.lib ole32.lib dxguid.lib dsound.lib dinput8.lib strmiids.lib wsock32.lib winmm.lib setupapi.lib ws2_32.lib oleaut32.lib fmodex_vc.lib opengl32.lib glu32.lib"
 				OutputFile="../gzdoomd.exe"
 				LinkIncremental="2"
 				SuppressStartupBanner="true"
 				AdditionalLibraryDirectories=""
 				IgnoreDefaultLibraryNames="libcmt;msvcrtd;msvcrt"
+				DelayLoadDLLs="fmodex.dll"
 				GenerateDebugInformation="true"
 				ProgramDatabaseFile=".\Debug/zdoomd.pdb"
 				SubSystem="2"
@@ -251,6 +253,7 @@
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="0"
 			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -280,22 +283,19 @@
 				EnableIntrinsicFunctions="true"
 				FavorSizeOrSpeed="1"
 				OmitFramePointers="true"
-				AdditionalIncludeDirectories="src\win32;src\sound;src;zlib;src\g_shared;src\g_doom;src\g_raven;src\g_heretic;src\g_hexen;src\g_strife;jpeg-6b;snes_spc\snes_spc;bzip2;lzma\C"
-				PreprocessorDefinitions="NDEBUG,WIN32,_WIN32,_WINDOWS,USEASM,HAVE_STRUPR,HAVE_FILELENGTH,NOASM,NO_VA_COPY"
+				AdditionalIncludeDirectories="src\win32;src\sound;src;zlib;src\g_shared;src\g_doom;src\g_raven;src\g_heretic;src\g_hexen;src\g_strife;&quot;jpeg-6b&quot;;game-music-emu\gme;gdtoa;bzip2;lzma\C"
+				PreprocessorDefinitions="NDEBUG,WIN32,_WIN32,_WIN64,_WINDOWS,HAVE_STRUPR,HAVE_FILELENGTH;NO_VA_COPY"
 				StringPooling="true"
 				RuntimeLibrary="0"
 				EnableFunctionLevelLinking="false"
 				ForceConformanceInForLoopScope="true"
+				RuntimeTypeInfo="false"
 				UsePrecompiledHeader="0"
 				PrecompiledHeaderFile=""
 				AssemblerOutput="0"
-				AssemblerListingLocation=".\Release/"
-				ObjectFile=".\Release/"
-				ProgramDataBaseFileName=".\Release/"
 				WarningLevel="3"
 				SuppressStartupBanner="true"
 				DebugInformationFormat="1"
-				CallingConvention="1"
 				CompileAs="0"
 				DisableSpecificWarnings="4996"
 			/>
@@ -312,24 +312,25 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="/MACHINE:I386"
-				AdditionalDependencies="ddraw.lib dxguid.lib dinput8.lib comctl32.lib strmiids.lib wsock32.lib ws2_32.lib winmm.lib fmodvc.lib setupapi.lib oleaut32.lib"
+				AdditionalDependencies="ddraw.lib dxguid.lib dinput8.lib comctl32.lib strmiids.lib wsock32.lib ws2_32.lib winmm.lib fmodex64_vc.lib setupapi.lib oleaut32.lib opengl32.lib glu32.lib"
 				ShowProgress="0"
-				OutputFile="../gzdoom.exe"
+				OutputFile="../gzdoom64.exe"
 				LinkIncremental="1"
 				SuppressStartupBanner="true"
 				IgnoreDefaultLibraryNames=""
+				DelayLoadDLLs="fmodex64.dll"
 				GenerateDebugInformation="true"
-				ProgramDatabaseFile="..\gzdoom.pdb"
+				ProgramDatabaseFile="..\gzdoom64.pdb"
 				StripPrivateSymbols=""
 				GenerateMapFile="true"
-				MapFileName=".\Release/zdoom.map"
+				MapFileName="$(OutDir)/gzdoom.map"
 				MapExports="true"
 				SubSystem="2"
 				StackReserveSize="0"
 				TerminalServerAware="2"
 				OptimizeReferences="2"
 				EnableCOMDATFolding="2"
+				SetChecksum="true"
 				TargetMachine="17"
 			/>
 			<Tool
@@ -365,10 +366,11 @@
 			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			UseOfMFC="0"
 			ATLMinimizesCRunTimeLibraryUsage="false"
+			CharacterSet="2"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
-				CommandLine="$(OutDir)\updaterevision.exe src src/svnrevision.h"
+				CommandLine="$(OutDir)\updaterevision.exe src src/svnrevision_gz.h"
 			/>
 			<Tool
 				Name="VCCustomBuildTool"
@@ -385,22 +387,23 @@
 				MkTypLibCompatible="true"
 				SuppressStartupBanner="true"
 				TargetEnvironment="3"
-				TypeLibraryName=".\Debug/zdoom.tlb"
+				TypeLibraryName=".\Debug/gzdoom.tlb"
 			/>
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="src\win32;src\sound;src;zlib;src\g_shared;src\g_doom;src\g_raven;src\g_heretic;src\g_hexen;src\g_strife;flac;bzip2;lzma\C"
-				PreprocessorDefinitions="WIN32,_DEBUG,_WIN32,_WINDOWS,USEASM,_CRTDBG_MAP_ALLOC,HAVE_STRUPR,HAVE_FILELENGTH,NOASM,NO_VA_COPY"
+				AdditionalIncludeDirectories="src\win32;src\sound;src;zlib;src\g_shared;src\g_doom;src\g_raven;src\g_heretic;src\g_hexen;src\g_strife;&quot;jpeg-6b&quot;;game-music-emu\gme;gdtoa;bzip2;lzma\C"
+				PreprocessorDefinitions="WIN32,_DEBUG,_WIN32,_WIN64,_WINDOWS,_CRTDBG_MAP_ALLOC,HAVE_STRUPR,HAVE_FILELENGTH;NO_VA_COPY"
 				MinimalRebuild="true"
 				RuntimeLibrary="1"
 				EnableFunctionLevelLinking="true"
 				ForceConformanceInForLoopScope="true"
+				RuntimeTypeInfo="false"
 				PrecompiledHeaderFile=""
-				AssemblerOutput="4"
-				AssemblerListingLocation=".\Debug/"
-				ObjectFile=".\Debug/"
-				ProgramDataBaseFileName=".\Debug/"
+				AssemblerOutput="0"
+				AssemblerListingLocation=".\x64/Debug/"
+				ObjectFile=".\x64/Debug/"
+				ProgramDataBaseFileName=".\x64/Debug/"
 				WarningLevel="3"
 				SuppressStartupBanner="true"
 				Detect64BitPortabilityProblems="true"
@@ -421,15 +424,15 @@
 			/>
 			<Tool
 				Name="VCLinkerTool"
-				AdditionalOptions="/MACHINE:I386"
-				AdditionalDependencies="dxguid.lib ddraw.lib dinput8.lib comctl32.lib strmiids.lib wsock32.lib winmm.lib fmodvc.lib setupapi.lib ws2_32.lib oleaut32.lib"
-				OutputFile="../gzdoomd.exe"
+				AdditionalDependencies="dxguid.lib ddraw.lib dinput8.lib comctl32.lib strmiids.lib wsock32.lib winmm.lib fmodex64_vc.lib setupapi.lib ws2_32.lib oleaut32.lib opengl32.lib glu32.lib"
+				OutputFile="../gzdoomd64.exe"
 				LinkIncremental="2"
 				SuppressStartupBanner="true"
 				AdditionalLibraryDirectories=""
-				IgnoreDefaultLibraryNames="libcmt;msvcrtd;msvcrt"
+				IgnoreDefaultLibraryNames="msvcrtd;libcmt"
+				DelayLoadDLLs="fmodex64.dll"
 				GenerateDebugInformation="true"
-				ProgramDatabaseFile=".\Debug/zdoomd.pdb"
+				ProgramDatabaseFile=".\Debug/gzdoomd.pdb"
 				SubSystem="2"
 				StackReserveSize="0"
 				TerminalServerAware="2"
@@ -466,7 +469,7 @@
 	</References>
 	<Files>
 		<Filter
-			Name="A Source Files"
+			Name="!Source Files"
 			Filter="c;cpp"
 			>
 			<File
@@ -662,6 +665,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\src\keysections.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\src\lumpconfigfile.cpp"
 				>
 			</File>
@@ -686,15 +693,7 @@
 				>
 			</File>
 			<File
-				RelativePath=".\src\m_menu.cpp"
-				>
-			</File>
-			<File
 				RelativePath=".\src\m_misc.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\src\m_options.cpp"
 				>
 			</File>
 			<File
@@ -707,10 +706,6 @@
 			</File>
 			<File
 				RelativePath=".\src\md5.cpp"
-				>
-			</File>
-			<File
-				RelativePath=".\src\mus2midi.cpp"
 				>
 			</File>
 			<File
@@ -799,6 +794,10 @@
 			</File>
 			<File
 				RelativePath=".\src\p_floor.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\p_glnodes.cpp"
 				>
 			</File>
 			<File
@@ -898,6 +897,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\src\p_usdf.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\src\p_user.cpp"
 				>
 			</File>
@@ -974,7 +977,7 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Creating $(InputName).h from src/$(InputFileName)"
-						CommandLine="tools\re2c\re2c -s -o &quot;src/$(InputName).h&quot; &quot;src/$(InputFileName)&quot;&#x0D;&#x0A;"
+						CommandLine="tools\re2c\re2c --no-generation-date -s -o &quot;src/$(InputName).h&quot; &quot;src/$(InputFileName)&quot;&#x0D;&#x0A;"
 						Outputs="&quot;src/$(InputName).h&quot;"
 					/>
 				</FileConfiguration>
@@ -984,7 +987,7 @@
 					<Tool
 						Name="VCCustomBuildTool"
 						Description="Creating $(InputName).h from src/$(InputFileName)"
-						CommandLine="tools\re2c\re2c -s -o &quot;src/$(InputName).h&quot; &quot;src/$(InputFileName)&quot;&#x0D;&#x0A;"
+						CommandLine="tools\re2c\re2c --no-generation-date -s -o &quot;src/$(InputName).h&quot; &quot;src/$(InputFileName)&quot;&#x0D;&#x0A;"
 						Outputs="&quot;src/$(InputName).h&quot;"
 					/>
 				</FileConfiguration>
@@ -998,11 +1001,19 @@
 				>
 			</File>
 			<File
+				RelativePath=".\src\statistics.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\src\stats.cpp"
 				>
 			</File>
 			<File
 				RelativePath=".\src\stringtable.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\strnatcmp.c"
 				>
 			</File>
 			<File
@@ -1375,10 +1386,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\src\m_menu.h"
-				>
-			</File>
-			<File
 				RelativePath=".\src\m_misc.h"
 				>
 			</File>
@@ -1483,6 +1490,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\src\po_man.h"
+				>
+			</File>
+			<File
 				RelativePath=".\src\s_playlist.h"
 				>
 			</File>
@@ -1496,6 +1507,10 @@
 			</File>
 			<File
 				RelativePath=".\src\sc_man.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\sc_man_tokens.h"
 				>
 			</File>
 			<File
@@ -1520,6 +1535,10 @@
 			</File>
 			<File
 				RelativePath=".\src\stringtable.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\strnatcmp.h"
 				>
 			</File>
 			<File
@@ -1588,6 +1607,10 @@
 			</File>
 			<File
 				RelativePath=".\src\x86.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\xs_Float.h"
 				>
 			</File>
 			<File
@@ -1934,10 +1957,6 @@
 				>
 			</File>
 			<File
-				RelativePath=".\src\win32\fb_d3d9_shaders.h"
-				>
-			</File>
-			<File
 				RelativePath=".\src\win32\fb_d3d9_wipe.cpp"
 				>
 			</File>
@@ -2027,6 +2046,10 @@
 			</File>
 			<File
 				RelativePath=".\src\win32\resource.h"
+				>
+			</File>
+			<File
+				RelativePath=".\wadsrc\static\shaders\d3d9\shaders.ps"
 				>
 			</File>
 			<File
@@ -2282,6 +2305,22 @@
 				</FileConfiguration>
 				<FileConfiguration
 					Name="Debug|Win32"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|x64"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug|x64"
 					ExcludedFromBuild="true"
 					>
 					<Tool
@@ -3232,10 +3271,6 @@
 						Name="VCCLCompilerTool"
 					/>
 				</FileConfiguration>
-			</File>
-			<File
-				RelativePath=".\src\g_heretic\heretic_sbar.cpp"
-				>
 			</File>
 		</Filter>
 		<Filter
@@ -4365,10 +4400,6 @@
 					/>
 				</FileConfiguration>
 			</File>
-			<File
-				RelativePath="src\g_hexen\hexen_sbar.cpp"
-				>
-			</File>
 		</Filter>
 		<Filter
 			Name="Strife Game"
@@ -5341,6 +5372,10 @@
 			Name="Versioning"
 			>
 			<File
+				RelativePath=".\src\svnrevision.h"
+				>
+			</File>
+			<File
 				RelativePath=".\src\version.h"
 				>
 			</File>
@@ -5360,6 +5395,7 @@
 					>
 					<Tool
 						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions="_DEBUG;NO_MANIFEST"
 						AdditionalIncludeDirectories="src\win32;$(NoInherit)"
 					/>
 				</FileConfiguration>
@@ -5376,6 +5412,7 @@
 					>
 					<Tool
 						Name="VCResourceCompilerTool"
+						PreprocessorDefinitions="_DEBUG;NO_MANIFEST"
 						AdditionalIncludeDirectories="src\win32;$(NoInherit)"
 					/>
 				</FileConfiguration>
@@ -5429,15 +5466,19 @@
 				>
 			</File>
 			<File
+				RelativePath=".\src\sound\music_fluidsynth_mididevice.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\src\sound\music_gme.cpp"
 				>
 			</File>
 			<File
-				RelativePath=".\src\sound\music_midi_base.cpp"
+				RelativePath=".\src\sound\music_hmi_midiout.cpp"
 				>
 			</File>
 			<File
-				RelativePath="src\sound\music_midi_midiout.cpp"
+				RelativePath=".\src\sound\music_midi_base.cpp"
 				>
 			</File>
 			<File
@@ -5462,6 +5503,14 @@
 			</File>
 			<File
 				RelativePath=".\src\oplsynth\music_opldumper_mididevice.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\sound\music_smf_midiout.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\sound\music_softsynth_mididevice.cpp"
 				>
 			</File>
 			<File
@@ -6115,6 +6164,22 @@
 						Name="VCCLCompilerTool"
 					/>
 				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|x64"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug|x64"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
 			</File>
 			<File
 				RelativePath=".\src\sdl\sdlglvideo.h"
@@ -6133,6 +6198,22 @@
 					>
 					<Tool
 						Name="VCCustomBuildTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|x64"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Debug|x64"
+					ExcludedFromBuild="true"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
 					/>
 				</FileConfiguration>
 			</File>
@@ -6468,6 +6549,10 @@
 		<Filter
 			Name="GL Renderer"
 			>
+			<File
+				RelativePath=".\src\gl\gl_functions.h"
+				>
+			</File>
 			<Filter
 				Name="System"
 				>
@@ -6792,10 +6877,6 @@
 					>
 				</File>
 				<File
-					RelativePath=".\src\gl\data\gl_nodes.cpp"
-					>
-				</File>
-				<File
 					RelativePath=".\src\gl\data\gl_portaldata.cpp"
 					>
 				</File>
@@ -6894,14 +6975,62 @@
 				<File
 					RelativePath=".\src\gl\hqnx\hq2x.cpp"
 					>
+					<FileConfiguration
+						Name="Release|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Debug|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
 				</File>
 				<File
 					RelativePath=".\src\gl\hqnx\hq3x.cpp"
 					>
+					<FileConfiguration
+						Name="Release|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Debug|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
 				</File>
 				<File
 					RelativePath=".\src\gl\hqnx\hq4x.cpp"
 					>
+					<FileConfiguration
+						Name="Release|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
+					<FileConfiguration
+						Name="Debug|x64"
+						ExcludedFromBuild="true"
+						>
+						<Tool
+							Name="VCCLCompilerTool"
+						/>
+					</FileConfiguration>
 				</File>
 				<File
 					RelativePath=".\src\gl\hqnx\hqnx.h"
@@ -6966,6 +7095,70 @@
 			</File>
 			<File
 				RelativePath=".\src\resourcefiles\resourcefile.h"
+				>
+			</File>
+		</Filter>
+		<Filter
+			Name="Menu"
+			>
+			<File
+				RelativePath=".\src\menu\colorpickermenu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\joystickmenu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\listmenu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\loadsavemenu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\menu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\menu.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\menudef.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\menuinput.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\messagebox.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\optionmenu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\optionmenuitems.h"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\playerdisplay.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\playermenu.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\readthis.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\src\menu\videomenu.cpp"
 				>
 			</File>
 		</Filter>

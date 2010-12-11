@@ -40,6 +40,21 @@ gameinfo
 	defaultdropstyle = 1
 	endoom = "ENDOOM"
 	player5start = 4001
+	pickupcolor = "d6 ba 45"
+	quitmessages = "$QUITMSG", "$QUITMSG1", "$QUITMSG2", "$QUITMSG3", "$QUITMSG4", "$QUITMSG5", "$QUITMSG6", "$QUITMSG7",
+				   "$QUITMSG8", "$QUITMSG9", "$QUITMSG10", "$QUITMSG11", "$QUITMSG12", "$QUITMSG13", "$QUITMSG14"
+				   
+	menufontcolor_title = "RED"
+	menufontcolor_label = "UNTRANSLATED"
+	menufontcolor_value = "GRAY"
+	menufontcolor_action = "GRAY"
+	menufontcolor_header = "GOLD"
+	menufontcolor_highlight = "YELLOW"
+	menufontcolor_selection = "BRICK"
+	menubackbutton = "M_BACK_D"
+	playerclasses = "DoomPlayer"
+	pausesign = "M_PAUSE"
+	gibfactor = 1
 }
 
 skill baby
@@ -50,6 +65,7 @@ skill baby
 	EasyBossBrain
 	SpawnFilter = Baby
 	PicName = "M_JKILL"
+	Name = "$SKILL_BABY"
 	Key = "i"
 }
 
@@ -58,6 +74,7 @@ skill easy
 	EasyBossBrain
 	SpawnFilter = Easy
 	PicName = "M_ROUGH"
+	Name = "$SKILL_EASY"
 	Key = "h"
 }
 
@@ -66,6 +83,7 @@ skill normal
 	SpawnFilter = Normal
 	PicName = "M_HURT"
 	Key = "h"
+	Name = "$SKILL_NORMAL"
 	DefaultSkill
 }
 
@@ -73,6 +91,7 @@ skill hard
 {
 	SpawnFilter = Hard
 	PicName = "M_ULTRA"
+	Name = "$SKILL_HARD"
 	Key = "u"
 }
 
@@ -84,6 +103,7 @@ skill nightmare
 	RespawnTime = 12
 	SpawnFilter = Nightmare
 	PicName = "M_NMARE"
+	Name = "$SKILL_NIGHTMARE"
 	MustConfirm
 	Key = "n"
 }

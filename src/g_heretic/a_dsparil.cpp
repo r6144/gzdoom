@@ -139,7 +139,7 @@ void P_DSparilTeleport (AActor *actor)
 	DSpotState *state = DSpotState::GetSpotState();
 	if (state == NULL) return;
 
-	spot = state->GetSpotWithMinDistance(PClass::FindClass("BossSpot"), actor->x, actor->y, 128*FRACUNIT);
+	spot = state->GetSpotWithMinMaxDistance(PClass::FindClass("BossSpot"), actor->x, actor->y, 128*FRACUNIT, 0);
 	if (spot == NULL) return;
 
 	prevX = actor->x;
@@ -258,8 +258,8 @@ DEFINE_ACTION_FUNCTION(AActor, A_GenWizard)
 		mo->z -= mo->GetDefault()->height/2;
 		if (!P_TestMobjLocation (mo))
 		{ // Didn't fit
+			mo->ClearCounters();
 			mo->Destroy ();
-			level.total_monsters--;
 		}
 		else
 		{ // [RH] Make the new wizards inherit D'Sparil's target

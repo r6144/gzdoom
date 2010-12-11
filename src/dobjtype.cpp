@@ -68,7 +68,7 @@ void PClass::StaticInit ()
 	// MinGW's linker is linking the object files backwards for me now...
 	if (head > tail)
 	{
-		swap (head, tail);
+		swapvalues (head, tail);
 	}
 	qsort (head + 1, tail - head - 1, sizeof(REGINFO), cregcmp);
 
@@ -384,7 +384,7 @@ const PClass *PClass::FindClassTentative (FName name)
 void PClass::InitializeActorInfo ()
 {
 	Symbols.SetParentTable (&ParentClass->Symbols);
-	Defaults = new BYTE[Size];
+	Defaults = (BYTE *)M_Malloc(Size);
 	if (ParentClass->Defaults != NULL) 
 	{
 		memcpy (Defaults, ParentClass->Defaults, ParentClass->Size);
@@ -410,6 +410,7 @@ void PClass::InitializeActorInfo ()
 	info->StateList = NULL;
 	info->DamageFactors = NULL;
 	info->PainChances = NULL;
+	info->ColorSets = NULL;
 	m_RuntimeActors.Push (this);
 }
 
@@ -483,6 +484,11 @@ const PClass *PClass::NativeClass() const
 		cls = cls->ParentClass;
 
 	return cls;
+}
+
+PClass *PClass::GetReplacement() const
+{
+	return ActorInfo->GetReplacement()->Class;
 }
 
 // Symbol tables ------------------------------------------------------------

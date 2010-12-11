@@ -799,26 +799,28 @@ static void APIENTRY Shutdown()
 }
 
 
-static bool APIENTRY SetFullscreen(int w, int h, int bits, int hz)
+static bool APIENTRY SetFullscreen(const char *devicename, int w, int h, int bits, int hz)
 {
 	DEVMODE dm;
 
 	if (w==0)
 	{
-		ChangeDisplaySettings(0, 0);
+		ChangeDisplaySettingsEx(devicename, 0, 0, 0, 0);
 	}
 	else
 	{
 		dm.dmSize = sizeof(DEVMODE);
+		dm.dmSpecVersion = DM_SPECVERSION;//Somebody owes me...
+		dm.dmDriverExtra = 0;//...1 hour of my life back
 		dm.dmPelsWidth = w;
 		dm.dmPelsHeight = h;
 		dm.dmBitsPerPel = bits;
 		dm.dmDisplayFrequency = hz;
 		dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL | DM_DISPLAYFREQUENCY;
-		if (DISP_CHANGE_SUCCESSFUL != ChangeDisplaySettings(&dm, CDS_FULLSCREEN))
+		if (DISP_CHANGE_SUCCESSFUL != ChangeDisplaySettingsEx(devicename, &dm, 0, CDS_FULLSCREEN, 0))
 		{
 			dm.dmFields &= ~DM_DISPLAYFREQUENCY;
-			return DISP_CHANGE_SUCCESSFUL == ChangeDisplaySettings(&dm, CDS_FULLSCREEN);
+			return DISP_CHANGE_SUCCESSFUL == ChangeDisplaySettingsEx(devicename, &dm, 0, CDS_FULLSCREEN, 0);
 		}
 	}
 	return true;
@@ -986,6 +988,7 @@ void APIENTRY GetContext(RenderContext & gl)
 	gl.Color4fv = glColor4fv;
 	gl.Color3f = glColor3f;
 	gl.Color3ub = glColor3ub;
+	gl.Color4ub = glColor4ub;
 
 	gl.ColorMask = glColorMask;
 

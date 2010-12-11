@@ -73,7 +73,7 @@ bool gl_GetSpriteLight(AActor *self, fixed_t x, fixed_t y, fixed_t z, subsector_
 
 	for(int j=0;j<2;j++)
 	{
-		// Go through moth light lists
+		// Go through both light lists
 		FLightNode * node = subsec->lighthead[j];
 		while (node)
 		{
@@ -182,7 +182,6 @@ int gl_SetSpriteLight(AActor * thing, int lightlevel, int rellight, FColormap * 
 					   float alpha, PalEntry ThingColor, bool weapon)
 { 
 	subsector_t * subsec = thing->subsector;
-
 	return gl_SetSpriteLight(thing, thing->x, thing->y, thing->z+(thing->height>>1), subsec, 
 					  lightlevel, rellight, cm, alpha, ThingColor, weapon);
 }

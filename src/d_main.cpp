@@ -38,7 +38,7 @@
 #endif
 #include <float.h>
 
-#ifdef unix
+#if defined(unix) || defined(__APPLE__)
 #include <unistd.h>
 #endif
 
@@ -61,7 +61,7 @@
 #include "f_wipe.h"
 #include "m_argv.h"
 #include "m_misc.h"
-#include "m_menu.h"
+#include "menu/menu.h"
 #include "c_console.h"
 #include "c_dispatch.h"
 #include "i_system.h"
@@ -104,6 +104,7 @@
 #include "compatibility.h"
 #include "m_joy.h"
 #include "sc_man.h"
+#include "po_man.h"
 #include "resourcefiles/resourcefile.h"
 
 EXTERN_CVAR(Bool, hud_althud)
@@ -115,12 +116,12 @@ void DrawHUD();
 
 // EXTERNAL FUNCTION PROTOTYPES --------------------------------------------
 
+extern void ReadStatistics();
 extern void M_RestoreMode ();
 extern void M_SetDefaultMode ();
 extern void R_ExecuteSetViewSize ();
 extern void G_NewInit ();
 extern void SetupPlayerClasses ();
-extern bool CheckCheatmode ();
 const IWADInfo *D_FindIWAD(TArray<FString> &wadfiles, const char *iwad, const char *basewad);
 
 // PUBLIC FUNCTION PROTOTYPES ----------------------------------------------
@@ -203,6 +204,7 @@ gamestate_t wipegamestate = GS_DEMOSCREEN;	// can be -1 to force a wipe
 bool PageBlank;
 FTexture *Page;
 FTexture *Advisory;
+bool nospriterename;
 
 cycle_t FrameCycles;
 
@@ -393,6 +395,18 @@ CVAR (Flag, sv_nofov,			dmflags, DF_NO_FOV);
 CVAR (Flag, sv_noweaponspawn,	dmflags, DF_NO_COOP_WEAPON_SPAWN);
 CVAR (Flag, sv_nocrouch,		dmflags, DF_NO_CROUCH);
 CVAR (Flag, sv_allowcrouch,		dmflags, DF_YES_CROUCH);
+CVAR (Flag, sv_cooploseinventory,	dmflags, DF_COOP_LOSE_INVENTORY);
+CVAR (Flag, sv_cooplosekeys,	dmflags, DF_COOP_LOSE_KEYS);
+CVAR (Flag, sv_cooploseweapons,	dmflags, DF_COOP_LOSE_WEAPONS);
+CVAR (Flag, sv_cooplosearmor,	dmflags, DF_COOP_LOSE_ARMOR);
+CVAR (Flag, sv_cooplosepowerups,	dmflags, DF_COOP_LOSE_POWERUPS);
+CVAR (Flag, sv_cooploseammo,	dmflags, DF_COOP_LOSE_AMMO);
+CVAR (Flag, sv_coophalveammo,	dmflags, DF_COOP_HALVE_AMMO);
+
+// Some (hopefully cleaner) interface to these settings.
+CVAR (Mask, sv_crouch,			dmflags, DF_NO_CROUCH|DF_YES_CROUCH);
+CVAR (Mask, sv_jump,			dmflags, DF_NO_JUMP|DF_YES_JUMP);
+CVAR (Mask, sv_fallingdamage,	dmflags, DF_FORCE_FALLINGHX|DF_FORCE_FALLINGZD);
 
 //==========================================================================
 //
@@ -461,7 +475,8 @@ CVAR (Flag, sv_disallowspying,		dmflags2, DF2_DISALLOW_SPYING);
 CVAR (Flag, sv_chasecam,			dmflags2, DF2_CHASECAM);
 CVAR (Flag, sv_disallowsuicide,		dmflags2, DF2_NOSUICIDE);
 CVAR (Flag, sv_noautoaim,			dmflags2, DF2_NOAUTOAIM);
-
+CVAR (Flag, sv_dontcheckammo,		dmflags2, DF2_DONTCHECKAMMO);
+CVAR (Flag, sv_killbossmonst,		dmflags2, DF2_KILLBOSSMONST);
 //==========================================================================
 //
 // CVAR compatflags
@@ -481,7 +496,12 @@ static int GetCompatibility(int mask)
 
 CUSTOM_CVAR (Int, compatflags, 0, CVAR_ARCHIVE|CVAR_SERVERINFO)
 {
+	int old = i_compatflags;
 	i_compatflags = GetCompatibility(self) | ii_compatflags;
+	if ((old ^i_compatflags) & COMPATF_POLYOBJ)
+	{
+		FPolyObj::ClearAllSubsectorLinks();
+	}
 }
 
 CUSTOM_CVAR(Int, compatmode, 0, CVAR_ARCHIVE|CVAR_NOINITCALL)
@@ -497,26 +517,33 @@ CUSTOM_CVAR(Int, compatmode, 0, CVAR_ARCHIVE|CVAR_NOINITCALL)
 
 	case 1:	// Doom2.exe compatible with a few relaxed settings
 		v = COMPATF_SHORTTEX|COMPATF_STAIRINDEX|COMPATF_USEBLOCKING|COMPATF_NODOORLIGHT|COMPATF_SPRITESORT|
-			COMPATF_TRACE|COMPATF_MISSILECLIP|COMPATF_SOUNDTARGET|COMPATF_DEHHEALTH|COMPATF_CROSSDROPOFF;
+			COMPATF_TRACE|COMPATF_MISSILECLIP|COMPATF_SOUNDTARGET|COMPATF_DEHHEALTH|COMPATF_CROSSDROPOFF|
+			COMPATF_LIGHT;
 		break;
 
 	case 2:	// same as 1 but stricter (NO_PASSMOBJ and INVISIBILITY are also set)
 		v = COMPATF_SHORTTEX|COMPATF_STAIRINDEX|COMPATF_USEBLOCKING|COMPATF_NODOORLIGHT|COMPATF_SPRITESORT|
 			COMPATF_TRACE|COMPATF_MISSILECLIP|COMPATF_SOUNDTARGET|COMPATF_NO_PASSMOBJ|COMPATF_LIMITPAIN|
-			COMPATF_DEHHEALTH|COMPATF_INVISIBILITY|COMPATF_CROSSDROPOFF|COMPATF_CORPSEGIBS;
+			COMPATF_DEHHEALTH|COMPATF_INVISIBILITY|COMPATF_CROSSDROPOFF|COMPATF_CORPSEGIBS|COMPATF_HITSCAN|
+			COMPATF_WALLRUN|COMPATF_NOTOSSDROPS|COMPATF_LIGHT;
 		break;
 
 	case 3: // Boom compat mode
-		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL;
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MISSILECLIP;
 		break;
 
 	case 4: // Old ZDoom compat mode
-		v = COMPATF_SOUNDTARGET;
+		v = COMPATF_SOUNDTARGET|COMPATF_LIGHT;
 		break;
 
 	case 5: // MBF compat mode
-		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MUSHROOM|
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MISSILECLIP|COMPATF_MUSHROOM|
 			COMPATF_MBFMONSTERMOVE|COMPATF_NOBLOCKFRIENDS;
+		break;
+
+	case 6:	// Boom with some added settings to reenable spme 'broken' behavior
+		v = COMPATF_TRACE|COMPATF_SOUNDTARGET|COMPATF_BOOMSCROLL|COMPATF_MISSILECLIP|COMPATF_NO_PASSMOBJ|
+			COMPATF_INVISIBILITY|COMPATF_CORPSEGIBS|COMPATF_HITSCAN|COMPATF_WALLRUN|COMPATF_NOTOSSDROPS;
 		break;
 
 	}
@@ -551,6 +578,9 @@ CVAR (Flag, compat_mbfmonstermove,compatflags, COMPATF_MBFMONSTERMOVE);
 CVAR (Flag, compat_corpsegibs,	compatflags, COMPATF_CORPSEGIBS);
 CVAR (Flag, compat_noblockfriends,compatflags,COMPATF_NOBLOCKFRIENDS);
 CVAR (Flag, compat_spritesort,	compatflags,COMPATF_SPRITESORT);
+CVAR (Flag, compat_hitscan,		compatflags,COMPATF_HITSCAN);
+CVAR (Flag, compat_light,		compatflags,COMPATF_LIGHT);
+CVAR (Flag, compat_polyobj,		compatflags,COMPATF_POLYOBJ);
 
 //==========================================================================
 //
@@ -757,7 +787,7 @@ void D_Display ()
 		FTexture *tex;
 		int x;
 
-		tex = TexMan[gameinfo.gametype & (GAME_DoomStrifeChex) ? "M_PAUSE" : "PAUSED"];
+		tex = TexMan[gameinfo.PauseSign];
 		x = (SCREENWIDTH - tex->GetScaledWidth() * CleanXfac)/2 +
 			tex->GetScaledLeftOffset() * CleanXfac;
 		screen->DrawTexture (tex, x, 4, DTA_CleanNoMove, true, TAG_DONE);
@@ -871,6 +901,8 @@ void D_DoomLoop ()
 
 	// Clamp the timer to TICRATE until the playloop has been entered.
 	r_NoInterpolate = true;
+
+	I_SetCursor(TexMan["cursor"]);
 
 	for (;;)
 	{
@@ -1201,8 +1233,11 @@ void D_DoAdvanceDemo (void)
 	case 2:
 		pagetic = (int)(gameinfo.pageTime * TICRATE);
 		gamestate = GS_DEMOSCREEN;
-		pagename = gameinfo.creditPages[pagecount];
-		pagecount = (pagecount+1) % gameinfo.creditPages.Size();
+		if (gameinfo.creditPages.Size() > 0)
+		{
+			pagename = gameinfo.creditPages[pagecount];
+			pagecount = (pagecount+1) % gameinfo.creditPages.Size();
+		}
 		demosequence = 1;
 		break;
 	}
@@ -1660,6 +1695,10 @@ static FString ParseGameInfo(TArray<FString> &pwads, const char *fn, const char 
 			}
 			while (sc.CheckToken(','));
 		}
+		else if (!nextKey.CompareNoCase("NOSPRITERENAME"))
+		{
+			nospriterename = true;
+		}
 	}
 	return iwad;
 }
@@ -1756,12 +1795,15 @@ void D_DoomMain (void)
 #endif
 #endif
 
+	// Check response files before coalescing file parameters.
+	M_FindResponseFile ();
+
 	// Combine different file parameters with their pre-switch bits.
 	Args->CollectFiles("-deh", ".deh");
 	Args->CollectFiles("-bex", ".bex");
 	Args->CollectFiles("-exec", ".cfg");
 	Args->CollectFiles("-playdemo", ".lmp");
-	Args->CollectFiles("-file", NULL);	// anythnig left goes after -file
+	Args->CollectFiles("-file", NULL);	// anything left goes after -file
 
 	PClass::StaticInit ();
 	atterm (C_DeinitConsole);
@@ -1772,7 +1814,6 @@ void D_DoomMain (void)
 
 	rngseed = I_MakeRNGSeed();
 	FRandom::StaticClearRandom ();
-	M_FindResponseFile ();
 
 	Printf ("M_LoadDefaults: Load system defaults.\n");
 	M_LoadDefaults ();			// load before initing other systems
@@ -2036,14 +2077,17 @@ void D_DoomMain (void)
 		StartScreen->AppendStatusLine(temp);
 	}
 
+	// [RH] Load sound environments
+	S_ParseReverbDef ();
+
 	// [RH] Parse through all loaded mapinfo lumps
 	Printf ("G_ParseMapInfo: Load map definitions.\n");
 	G_ParseMapInfo (iwad_info->MapInfo);
+	ReadStatistics();
 
 	// [RH] Parse any SNDINFO lumps
 	Printf ("S_InitData: Load sound definitions.\n");
 	S_InitData ();
-
 
 	Printf ("Texman.Init: Init texture manager.\n");
 	TexMan.Init();
@@ -2056,6 +2100,7 @@ void D_DoomMain (void)
 
 	// [GRB] Initialize player class list
 	SetupPlayerClasses ();
+
 
 	// [RH] Load custom key and weapon settings from WADs
 	D_LoadWadSettings ();
@@ -2126,7 +2171,7 @@ void D_DoomMain (void)
 	bglobal.spawn_tries = 0;
 	bglobal.wanted_botnum = bglobal.getspawned.Size();
 
-	Printf ("M_Init: Init miscellaneous info.\n");
+	Printf ("M_Init: Init menus.\n");
 	M_Init ();
 
 	Printf ("P_Init: Init Playloop state.\n");
@@ -2279,11 +2324,37 @@ void FStartupScreen::AppendStatusLine(const char *status)
 //
 //==========================================================================
 
+//==========================================================================
+//
+// STAT fps
+//
+// Displays statistics about rendering times
+//
+//==========================================================================
+
 ADD_STAT (fps)
 {
 	FString out;
 	out.Format("frame=%04.1f ms  walls=%04.1f ms  planes=%04.1f ms  masked=%04.1f ms",
 		FrameCycles.TimeMS(), WallCycles.TimeMS(), PlaneCycles.TimeMS(), MaskedCycles.TimeMS());
+	return out;
+}
+
+
+static double f_acc, w_acc,p_acc,m_acc;
+static int acc_c;
+
+ADD_STAT (fps_accumulated)
+{
+	f_acc += FrameCycles.TimeMS();
+	w_acc += WallCycles.TimeMS();
+	p_acc += PlaneCycles.TimeMS();
+	m_acc += MaskedCycles.TimeMS();
+	acc_c++;
+	FString out;
+	out.Format("frame=%04.1f ms  walls=%04.1f ms  planes=%04.1f ms  masked=%04.1f ms  %d counts",
+		f_acc/acc_c, w_acc/acc_c, p_acc/acc_c, m_acc/acc_c, acc_c);
+	Printf(PRINT_LOG, "%s\n", out.GetChars());
 	return out;
 }
 

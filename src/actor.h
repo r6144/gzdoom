@@ -261,7 +261,7 @@ enum
 	MF4_NOEXTREMEDEATH	= 0x10000000,	// this projectile or weapon never gibs its victim
 	MF4_EXTREMEDEATH	= 0x20000000,	// this projectile or weapon always gibs its victim
 	MF4_FRIGHTENED		= 0x40000000,	// Monster runs away from player
-	/*					= 0x80000000,	*/
+	MF4_BOSSSPAWNED		= 0x80000000,	// Spawned by a boss spawn cube
 	
 // --- mobj.flags5 ---
 
@@ -269,7 +269,7 @@ enum
 	MF5_FASTMELEE		= 0x00000002,	// has a faster melee attack when DF_FAST_MONSTERS or nightmare is on.
 	MF5_NODROPOFF		= 0x00000004,	// cannot drop off under any circumstances.
 	/*					= 0x00000008,	*/
-	/*					= 0x00000010,	*/
+	MF5_COUNTSECRET		= 0x00000010,	// From Doom 64: actor acts like a secret
 	MF5_AVOIDINGDROPOFF = 0x00000020,	// Used to move monsters away from dropoffs
 	MF5_NODAMAGE		= 0x00000040,	// Actor can be shot and reacts to being shot but takes no damage
 	MF5_CHASEGOAL		= 0x00000080,	// Walks to goal instead of target if a valid goal is set.
@@ -289,7 +289,7 @@ enum
 	MF5_NOINTERACTION	= 0x00200000,	// Thing is completely excluded from any gameplay related checks
 	MF5_NOTIMEFREEZE	= 0x00400000,	// Actor is not affected by time freezer
 	MF5_PUFFGETSOWNER	= 0x00800000,	// [BB] Sets the owner of the puff to the player who fired it
-	MF5_SPECIALFIREDAMAGE=0x01000000,	// Special treatment of PhoenixFX1 turned into a flag to removr
+	MF5_SPECIALFIREDAMAGE=0x01000000,	// Special treatment of PhoenixFX1 turned into a flag to remove
 										// dependence of main engine code of specific actor types.
 	MF5_SUMMONEDMONSTER	= 0x02000000,	// To mark the friendly Minotaur. Hopefully to be generalized later.
 	MF5_NOVERTICALMELEERANGE=0x04000000,// Does not check vertical distance for melee range
@@ -320,6 +320,10 @@ enum
 	MF6_NOTRIGGER		= 0x00010000,	// actor cannot trigger any line actions
 	MF6_SHATTERING		= 0x00020000,	// marks an ice corpse for forced shattering
 	MF6_KILLED			= 0x00040000,	// Something that was killed (but not necessarily a corpse)
+	MF6_BLOCKEDBYSOLIDACTORS = 0x00080000, // Blocked by solid actors, even if not solid itself
+	MF6_ADDITIVEPOISONDAMAGE	= 0x00100000,
+	MF6_ADDITIVEPOISONDURATION	= 0x00200000,
+	MF6_NOMENU			= 0x00400000,	// Player class should not appear in the class selection menu.
 
 // --- mobj.renderflags ---
 
@@ -505,7 +509,6 @@ enum
 	AMETA_BloodColor,		// colorized blood
 	AMETA_GibHealth,		// negative health below which this monster dies an extreme death
 	AMETA_WoundHealth,		// health needed to enter wound state
-	AMETA_PoisonDamage,		// Amount of poison damage
 	AMETA_FastSpeed,		// Speed in fast mode
 	AMETA_RDFactor,			// Radius damage factor
 	AMETA_CameraHeight,		// Height of camera when used as such
@@ -646,7 +649,7 @@ public:
 	bool CheckLocalView (int playernum) const;
 
 	// Finds the first item of a particular type.
-	AInventory *FindInventory (const PClass *type);
+	AInventory *FindInventory (const PClass *type, bool subclass = false);
 	AInventory *FindInventory (FName type);
 	template<class T> T *FindInventory ()
 	{
@@ -701,6 +704,7 @@ public:
 
 	// Return starting health adjusted by skill level
 	int SpawnHealth();
+	int GibHealth();
 
 	// Check for monsters that count as kill but excludes all friendlies.
 	bool CountsAsKill() const
@@ -721,19 +725,26 @@ public:
 
 	const PClass *GetBloodType(int type = 0) const
 	{
+		const PClass *bloodcls;
 		if (type == 0)
 		{
-			return PClass::FindClass((ENamedName)GetClass()->Meta.GetMetaInt(AMETA_BloodType, NAME_Blood));
+			bloodcls = PClass::FindClass((ENamedName)GetClass()->Meta.GetMetaInt(AMETA_BloodType, NAME_Blood));
 		}
 		else if (type == 1)
 		{
-			return PClass::FindClass((ENamedName)GetClass()->Meta.GetMetaInt(AMETA_BloodType2, NAME_BloodSplatter));
+			bloodcls = PClass::FindClass((ENamedName)GetClass()->Meta.GetMetaInt(AMETA_BloodType2, NAME_BloodSplatter));
 		}
 		else if (type == 2)
 		{
-			return  PClass::FindClass((ENamedName)GetClass()->Meta.GetMetaInt(AMETA_BloodType3, NAME_AxeBlood));
+			bloodcls = PClass::FindClass((ENamedName)GetClass()->Meta.GetMetaInt(AMETA_BloodType3, NAME_AxeBlood));
 		}
 		else return NULL;
+
+		if (bloodcls != NULL)
+		{
+			bloodcls = bloodcls->GetReplacement();
+		}
+		return bloodcls;
 	}
 
 	// Calculate amount of missile damage
@@ -765,6 +776,7 @@ public:
 	fixed_t			pitch, roll;
 	FBlockNode		*BlockNode;			// links in blocks (if needed)
 	struct sector_t	*Sector;
+	subsector_t *		subsector;
 	fixed_t			floorz, ceilingz;	// closest together of contacted secs
 	fixed_t			dropoffz;		// killough 11/98: the lowest floor over all contacted Sectors.
 
@@ -822,7 +834,7 @@ public:
 	BYTE			MinMissileChance;// [RH] If a random # is > than this, then missile attack.
 	SBYTE			LastLookPlayerNumber;// Player number last looked for (if TIDtoHate == 0)
 	WORD			BounceFlags;	// which bouncing type?
-	WORD			SpawnFlags;
+	DWORD			SpawnFlags;		// Increased to DWORD because of Doom 64
 	fixed_t			meleerange;		// specifies how far a melee attack reaches.
 	fixed_t			meleethreshold;	// Distance below which a monster doesn't try to shoot missiles anynore
 									// but instead tries to come closer for a melee attack.
@@ -842,6 +854,15 @@ public:
 
 	AActor			*BlockingMobj;	// Actor that blocked the last move
 	line_t			*BlockingLine;	// Line that blocked the last move
+
+	int PoisonDamage; // Damage received per tic from poison.
+	int PoisonDuration; // Duration left for receiving poison damage.
+	int PoisonPeriod; // How often poison damage is applied. (Every X tics.)
+
+	int PoisonDamageReceived; // Damage received per tic from poison.
+	int PoisonDurationReceived; // Duration left for receiving poison damage.
+	int PoisonPeriodReceived; // How often poison damage is applied. (Every X tics.)
+	TObjPtr<AActor> Poisoner; // Last source of received poison damage.
 
 	// a linked list of sectors where this object appears
 	struct msecnode_t	*touching_sectorlist;				// phares 3/14/98
@@ -882,8 +903,9 @@ public:
 	FState *MeleeState;
 	FState *MissileState;
 
-	// [RH] The dialogue to show when this actor is "used."
-	FStrifeDialogueNode *Conversation;
+	
+	int ConversationRoot;				// THe root of the current dialogue
+	FStrifeDialogueNode *Conversation;	// [RH] The dialogue to show when this actor is "used."
 
 	// [RH] Decal(s) this weapon/projectile generates on impact.
 	FDecalBase *DecalGenerator;
@@ -913,11 +935,11 @@ public:
 	void SetOrigin (fixed_t x, fixed_t y, fixed_t z);
 	bool InStateSequence(FState * newstate, FState * basestate);
 	int GetTics(FState * newstate);
-	bool SetState (FState *newstate);
-	bool SetStateNF (FState *newstate);
+	bool SetState (FState *newstate, bool nofunction=false);
 	virtual bool UpdateWaterLevel (fixed_t oldz, bool splash=true);
 	bool isFast();
 	void SetIdle();
+	void ClearCounters();
 
 	FState *FindState (FName label) const
 	{
@@ -930,13 +952,11 @@ public:
 		return GetClass()->ActorInfo->FindState(2, names, exact);
 	}
 
-
 	bool HasSpecialDeathStates () const;
 
 	TArray<TObjPtr<AActor> >		dynamiclights;
 	void *				lightassociations;
 	bool				hasmodel;
-	subsector_t *		subsector;
 
 	size_t PropagateMark();
 };

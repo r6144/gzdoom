@@ -58,6 +58,7 @@
 #include "gl/textures/gl_hwtexture.h"
 #include "gl/textures/gl_texture.h"
 #include "gl/textures/gl_translate.h"
+#include "gl/textures/gl_skyboxtexture.h"
 #include "gl/utility/gl_clock.h"
 #include "gl/utility/gl_templates.h"
 #include "gl/gl_functions.h"
@@ -67,18 +68,18 @@ EXTERN_CVAR (Float, vid_brightness)
 EXTERN_CVAR (Float, vid_contrast)
 EXTERN_CVAR (Bool, vid_vsync)
 
-void gl_SetupMenu();
-
 FGLRenderer *GLRenderer;
 
+void gl_SetupMenu();
+
 //==========================================================================
 //
 //
 //
 //==========================================================================
 
-OpenGLFrameBuffer::OpenGLFrameBuffer(int width, int height, int bits, int refreshHz, bool fullscreen) : 
-	Super(width, height, bits, refreshHz, fullscreen) 
+OpenGLFrameBuffer::OpenGLFrameBuffer(void *hMonitor, int width, int height, int bits, int refreshHz, bool fullscreen) : 
+	Super(hMonitor, width, height, bits, refreshHz, fullscreen) 
 {
 	GLRenderer = new FGLRenderer(this);
 	memcpy (SourcePalette, GPalette.BaseColors, sizeof(PalEntry)*256);
@@ -87,6 +88,7 @@ OpenGLFrameBuffer::OpenGLFrameBuffer(int width, int height, int bits, int refres
 	LastCamera = NULL;
 
 	InitializeState();
+	gl_SetupMenu();
 	gl_GenerateGlobalBrightmapFromColormap();
 	DoSetGamma();
 	needsetgamma = true;
@@ -113,7 +115,6 @@ void OpenGLFrameBuffer::InitializeState()
 
 	gl.LoadExtensions();
 	Super::InitializeState();
-	gl_SetupMenu();
 	if (first)
 	{
 		first=false;
@@ -162,7 +163,9 @@ void OpenGLFrameBuffer::InitializeState()
 
 	gl.Clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	gl.Viewport(0, (GetTrueHeight()-GetHeight())/2, GetWidth(), GetHeight()); 
+	int trueH = GetTrueHeight();
+	int h = GetHeight();
+	gl.Viewport(0, (trueH - h)/2, GetWidth(), GetHeight()); 
 
 	Begin2D(false);
 	GLRenderer->Initialize();
@@ -336,6 +339,36 @@ void OpenGLFrameBuffer::GetFlash(PalEntry &rgb, int &amount)
 int OpenGLFrameBuffer::GetPageCount()
 {
 	return 1;
+}
+
+
+void OpenGLFrameBuffer::GetHitlist(BYTE *hitlist)
+{
+	Super::GetHitlist(hitlist);
+
+	// check skybox textures and mark the separate faces as used
+	for(int i=0;i<TexMan.NumTextures(); i++)
+	{
+		if (hitlist[i])
+		{
+			FTexture *tex = TexMan.ByIndex(i);
+			if (tex->gl_info.bSkybox)
+			{
+				FSkyBox *sb = static_cast<FSkyBox*>(tex);
+				for(int i=0;i<6;i++) 
+				{
+					if (sb->faces[i]) 
+					{
+						int index = sb->faces[i]->id.GetIndex();
+						hitlist[index] |= 1;
+					}
+				}
+			}
+		}
+	}
+
+
+	// check model skins
 }
 
 //==========================================================================
@@ -522,6 +555,26 @@ void OpenGLFrameBuffer::Clear(int left, int top, int right, int bottom, int palc
 	if (GLRenderer != NULL) 
 		GLRenderer->Clear(left, top, right, bottom, palcolor, color);
 }
+
+//==========================================================================
+//
+// D3DFB :: FillSimplePoly
+//
+// Here, "simple" means that a simple triangle fan can draw it.
+//
+//==========================================================================
+
+void OpenGLFrameBuffer::FillSimplePoly(FTexture *texture, FVector2 *points, int npoints,
+	double originx, double originy, double scalex, double scaley,
+	angle_t rotation, FDynamicColormap *colormap, int lightlevel)
+{
+	if (GLRenderer != NULL)
+	{
+		GLRenderer->FillSimplePoly(texture, points, npoints, originx, originy, scalex, scaley,
+			rotation, colormap, lightlevel);
+	}
+}
+
 
 //===========================================================================
 // 

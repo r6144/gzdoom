@@ -189,7 +189,7 @@ protected:
 
 private:
 	void CheckForHacks ();
-	void ParsePatch(FScanner &sc, TexPart & part);
+	void ParsePatch(FScanner &sc, TexPart & part, bool silent, int usetype);
 };
 
 //==========================================================================
@@ -499,6 +499,8 @@ void FMultiPatchTexture::MakeTexture ()
 	{
 		for (int i = 0; i < NumParts; ++i)
 		{
+			if (Parts[i].Texture->bHasCanvas) continue;	// cannot use camera textures as patch.
+		
 			BYTE *trans = Parts[i].Translation ? Parts[i].Translation->Remap : NULL;
 			{
 				if (Parts[i].Blend != 0)
@@ -561,6 +563,8 @@ int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rota
 	for(int i = 0; i < NumParts; i++)
 	{
 		int ret = -1;
+		
+		if (Parts[i].Texture->bHasCanvas) continue;	// cannot use camera textures as patch.
 
 		// rotated multipatch parts cannot be composited directly
 		bool rotatedmulti = Parts[i].Rotate != 0 && Parts[i].Texture->bMultiPatch;
@@ -614,6 +618,7 @@ int FMultiPatchTexture::CopyTrueColorPixels(FBitmap *bmp, int x, int y, int rota
 			FBitmap bmp1;
 			if (bmp1.Create(Parts[i].Texture->GetWidth(), Parts[i].Texture->GetHeight()))
 			{
+				bmp1.Zero();
 				Parts[i].Texture->CopyTrueColorPixels(&bmp1, 0, 0);
 				bmp->CopyPixelDataRGB(x+Parts[i].OriginX, y+Parts[i].OriginY, bmp1.GetPixels(), 
 					bmp1.GetWidth(), bmp1.GetHeight(), 4, bmp1.GetPitch(), Parts[i].Rotate, CF_BGRA, inf);
@@ -965,12 +970,12 @@ void FTextureManager::AddTexturesLumps (int lump1, int lump2, int patcheslump)
 //
 //==========================================================================
 
-void FMultiPatchTexture::ParsePatch(FScanner &sc, TexPart & part)
+void FMultiPatchTexture::ParsePatch(FScanner &sc, TexPart & part, bool silent, int usetype)
 {
 	FString patchname;
 	sc.MustGetString();
 
-	FTextureID texno = TexMan.CheckForTexture(sc.String, TEX_WallPatch);
+	FTextureID texno = TexMan.CheckForTexture(sc.String, usetype);
 	int Mirror = 0;
 
 	if (!texno.isValid())
@@ -991,10 +996,10 @@ void FMultiPatchTexture::ParsePatch(FScanner &sc, TexPart & part)
 		}
 		else if (strlen(sc.String) <= 8 && !strpbrk(sc.String, "./"))
 		{
-			int lumpnum = Wads.CheckNumForName(sc.String, ns_patches);
+			int lumpnum = Wads.CheckNumForName(sc.String, usetype == TEX_MiscPatch? ns_graphics : ns_patches);
 			if (lumpnum >= 0)
 			{
-				part.Texture = FTexture::CreateTexture(lumpnum, TEX_WallPatch);
+				part.Texture = FTexture::CreateTexture(lumpnum, usetype);
 				TexMan.AddTexture(part.Texture);
 			}
 		}
@@ -1006,7 +1011,7 @@ void FMultiPatchTexture::ParsePatch(FScanner &sc, TexPart & part)
 	}
 	if (part.Texture == NULL)
 	{
-		Printf("Unknown patch '%s' in texture '%s'\n", sc.String, Name);
+		if (!silent) Printf("Unknown patch '%s' in texture '%s'\n", sc.String, Name);
 	}
 	sc.MustGetStringName(",");
 	sc.MustGetNumber();
@@ -1159,6 +1164,14 @@ void FMultiPatchTexture::ParsePatch(FScanner &sc, TexPart & part)
 				bComplex |= (part.op != OP_COPY);
 				bTranslucentPatches = bComplex;
 			}
+			else if (sc.Compare("useoffsets"))
+			{
+				if (part.Texture != NULL)
+				{
+					part.OriginX -= part.Texture->LeftOffset;
+					part.OriginY -= part.Texture->TopOffset;
+				}
+			}
 		}
 	}
 	if (Mirror & 2)
@@ -1182,11 +1195,25 @@ FMultiPatchTexture::FMultiPatchTexture (FScanner &sc, int usetype)
 : Pixels (0), Spans(0), Parts(0), bRedirect(false), bTranslucentPatches(false)
 {
 	TArray<TexPart> parts;
+	bool bSilent = false;
 
 	bMultiPatch = true;
 	sc.SetCMode(true);
 	sc.MustGetString();
-	uppercopy(Name, sc.String);
+	const char* textureName = NULL;
+	if (sc.Compare("optional"))
+	{
+		bSilent = true;
+		sc.MustGetString();
+		if (sc.Compare(","))
+		{
+			// this is not right. Apparently a texture named 'optional' is being defined right now...
+			sc.UnGet();
+			textureName = "optional";
+			bSilent = false;
+		}
+	}
+	uppercopy(Name, !textureName ? sc.String : textureName);
 	Name[8] = 0;
 	sc.MustGetStringName(",");
 	sc.MustGetNumber();
@@ -1226,7 +1253,15 @@ FMultiPatchTexture::FMultiPatchTexture (FScanner &sc, int usetype)
 			else if (sc.Compare("Patch"))
 			{
 				TexPart part;
-				ParsePatch(sc, part);
+				ParsePatch(sc, part, bSilent, TEX_WallPatch);
+				if (part.Texture != NULL) parts.Push(part);
+				part.Texture = NULL;
+				part.Translation = NULL;
+			}
+			else if (sc.Compare("Graphic"))
+			{
+				TexPart part;
+				ParsePatch(sc, part, bSilent, TEX_MiscPatch);
 				if (part.Texture != NULL) parts.Push(part);
 				part.Texture = NULL;
 				part.Translation = NULL;

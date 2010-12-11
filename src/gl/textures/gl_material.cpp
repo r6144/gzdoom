@@ -447,12 +447,12 @@ const FHardwareTexture *FGLTexture::Bind(int texunit, int cm, int clampmode, int
 			if (!hwtex->CreateTexture(buffer, w, h, true, texunit, cm, translation)) 
 			{
 				// could not create texture
-				delete buffer;
+				delete[] buffer;
 				return NULL;
 			}
 			gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, (clampmode & GLT_CLAMPX)? GL_CLAMP_TO_EDGE : GL_REPEAT);
 			gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, (clampmode & GLT_CLAMPY)? GL_CLAMP_TO_EDGE : GL_REPEAT);
-			delete buffer;
+			delete[] buffer;
 		}
 
 		if (tex->bHasCanvas) static_cast<FCanvasTexture*>(tex)->NeedUpdate();
@@ -504,10 +504,10 @@ const FHardwareTexture * FGLTexture::BindPatch(int texunit, int cm, int translat
 			if (!glpatch->CreateTexture(buffer, w, h, false, texunit, cm, translation)) 
 			{
 				// could not create texture
-				delete buffer;
+				delete[] buffer;
 				return NULL;
 			}
-			delete buffer;
+			delete[] buffer;
 			gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 			gl.TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 		}
@@ -731,6 +731,7 @@ bool FMaterial::TrimBorders(int *rect)
 		rect[1] = 0;
 		rect[2] = 1;
 		rect[3] = 1;
+		delete [] buffer;
 		return true;
 	}
 
@@ -745,14 +746,14 @@ bool FMaterial::TrimBorders(int *rect)
 	rect[0] = 0;
 	rect[2] = w;
 
-	buffer += rect[1] * w * 4;
+	unsigned char *bufferoff = buffer + (rect[1] * w * 4);
 	h = rect[3];
 
 	for(int x = 0; x < w; x++)
 	{
 		for(int y = 0; y < h; y++)
 		{
-			if (buffer[(x+y*w)*4+3] != 0) goto outl;
+			if (bufferoff[(x+y*w)*4+3] != 0) goto outl;
 		}
 		rect[0]++;
 	}
@@ -763,10 +764,15 @@ outl:
 	{
 		for(int y = 0; y < h; y++)
 		{
-			if (buffer[(x+y*w)*4+3] != 0) return true;
+			if (bufferoff[(x+y*w)*4+3] != 0) 
+			{
+				delete [] buffer;
+				return true;
+			}
 		}
 		rect[2]--;
 	}
+	delete [] buffer;
 	return true;
 }
 
@@ -786,7 +792,7 @@ const WorldTextureInfo *FMaterial::Bind(int cm, int clampmode, int translation)
 
 	int softwarewarp = gl_RenderState.SetupShader(tex->bHasCanvas, shaderindex, cm, tex->gl_info.shaderspeed);
 
-	if (tex->bHasCanvas) clampmode = 0;
+	if (tex->bHasCanvas || tex->bWarped) clampmode = 0;
 	else if (clampmode != -1) clampmode &= 3;
 	else clampmode = 4;
 

@@ -41,6 +41,7 @@
 #include "gl/system/gl_system.h"
 #include "gi.h"
 #include "m_png.h"
+#include "m_random.h"
 #include "st_stuff.h"
 #include "dobject.h"
 #include "doomstat.h"
@@ -49,6 +50,7 @@
 #include "r_main.h"
 #include "r_things.h"
 #include "sbar.h"
+#include "po_man.h"
 #include "gl/gl_functions.h"
 
 #include "gl/system/gl_framebuffer.h"
@@ -305,6 +307,7 @@ void FGLRenderer::CreateScene()
 {
 	// reset the portal manager
 	GLPortal::StartFrame();
+	PO_LinkToSubsectors();
 
 	ProcessAll.Clock();
 
@@ -728,19 +731,21 @@ void FGLRenderer::DrawBlend(sector_t * viewsector)
 		if (player->bonuscount)
 		{
 			cnt = player->bonuscount << 3;
-			DBaseStatusBar::AddBlend (0.8431f, 0.7333f, 0.2706f, cnt > 128 ? 0.5f : cnt / 256.f, blend);
+			DBaseStatusBar::AddBlend (RPART(gameinfo.pickupcolor)/255.f, GPART(gameinfo.pickupcolor)/255.f, 
+						BPART(gameinfo.pickupcolor)/255.f, cnt > 128 ? 0.5f : cnt / 255.f, blend);
 		}
 		
-		// FIXME!
-		cnt = DamageToAlpha[MIN (113, player->damagecount)];
-		
-		if (cnt)
+		if (player->mo->DamageFade.a != 0)
 		{
-			if (cnt > 175) cnt = 175; // too strong and it gets too opaque
-			
-			DBaseStatusBar::AddBlend (player->mo->DamageFade.r / 255.f, 
-				player->mo->DamageFade.g / 255.f, 
-				player->mo->DamageFade.b / 255.f, cnt / 255.f, blend);
+			cnt = DamageToAlpha[MIN (113, player->damagecount * player->mo->DamageFade.a / 255)];
+				
+			if (cnt)
+			{
+				if (cnt > 175) cnt = 175; // too strong and it gets too opaque
+
+				APlayerPawn *mo = player->mo;
+				DBaseStatusBar::AddBlend (mo->DamageFade.r / 255.f, mo->DamageFade.g / 255.f, mo->DamageFade.b / 255.f, cnt / 255.f, blend);
+			}
 		}
 		
 		if (player->poisoncount)
@@ -758,7 +763,7 @@ void FGLRenderer::DrawBlend(sector_t * viewsector)
 			DBaseStatusBar::AddBlend (0.25f, 0.25f, 0.853f, 0.4f, blend);
 		}
 
-		// translucency may not go below 50%!
+		// translucency may not go below 50%
 		if (blend[3] > maxinvalpha) blend[3] = maxinvalpha;
 	}
 	
@@ -877,11 +882,11 @@ void FGLRenderer::SetFixedColormap (player_t *player)
 				PalEntry color = in->GetBlend ();
 
 				// Need special handling for light amplifiers 
-				if (in->IsA(RUNTIME_CLASS(APowerTorch)))
+				if (in->IsKindOf(RUNTIME_CLASS(APowerTorch)))
 				{
 					gl_fixedcolormap = cplayer->fixedlightlevel + CM_TORCH;
 				}
-				else if (in->IsA(RUNTIME_CLASS(APowerLightAmp)))
+				else if (in->IsKindOf(RUNTIME_CLASS(APowerLightAmp)))
 				{
 					gl_fixedcolormap = CM_LITE;
 				}
@@ -944,13 +949,45 @@ sector_t * FGLRenderer::RenderViewpoint (AActor * camera, GL_IRECT * bounds, flo
 // renders the view
 //
 //-----------------------------------------------------------------------------
+static FRandom pr_glhom;
+EXTERN_CVAR(Int, r_clearbuffer)
 CVAR(Bool, gl_testdl, false, 0)
 static int dl = -1;
 static int indl = 0;
 
 void FGLRenderer::RenderView (player_t* player)
 {
-	AActor *&LastCamera = static_cast<OpenGLFrameBuffer*>(screen)->LastCamera;
+	OpenGLFrameBuffer* GLTarget = static_cast<OpenGLFrameBuffer*>(screen);
+
+	if (r_clearbuffer != 0)
+	{
+		int color;
+		int hom = r_clearbuffer;
+
+		if (hom == 3)
+		{
+			hom = ((I_FPSTime() / 128) & 1) + 1;
+		}
+		if (hom == 1)
+		{
+			color = GPalette.BlackIndex;
+		}
+		else if (hom == 2)
+		{
+			color = GPalette.WhiteIndex;
+		}
+		else if (hom == 4)
+		{
+			color = (I_FPSTime() / 32) & 255;
+		}
+		else
+		{
+			color = pr_glhom();
+		}
+		GLTarget->Clear(0, 0, screen->GetWidth(), screen->GetHeight(), color, 0);
+	}
+
+	AActor *&LastCamera = GLTarget->LastCamera;
 
 	if (player->camera != LastCamera)
 	{
@@ -978,7 +1015,7 @@ void FGLRenderer::RenderView (player_t* player)
 
 	// I stopped using BaseRatioSizes here because the information there wasn't well presented.
 	#define RMUL (1.6f/1.333333f)
-	static float ratios[]={RMUL*1.333333f, RMUL*1.777777f, RMUL*1.6f, RMUL*1.333333f, RMUL*1.2f};
+	static float ratios[]={RMUL*1.333333f, RMUL*1.777777f, RMUL*1.6f, RMUL*1.333333f, RMUL*1.25f};
 
 	// now render the main view
 	float fovratio;

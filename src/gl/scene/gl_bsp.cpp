@@ -42,6 +42,8 @@
 #include "p_local.h"
 #include "a_sharedglobal.h"
 #include "r_sky.h"
+#include "r_bsp.h"
+#include "po_man.h"
 
 #include "gl/renderer/gl_renderer.h"
 #include "gl/data/gl_data.h"
@@ -68,7 +70,11 @@ CVAR(Bool, gl_render_flats, true, 0)
 //
 //==========================================================================
 
-static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
+// making these 2 variables global instead of passing them as function parameters is faster.
+static subsector_t *currentsubsector;
+static sector_t *currentsector;
+
+static void AddLine (seg_t *seg)
 {
 	angle_t startAngle, endAngle;
 	sector_t * backsector = NULL;
@@ -84,8 +90,20 @@ static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
 	endAngle = seg->v1->GetClipAngle();
 
 	// Back side, i.e. backface culling	- read: endAngle >= startAngle!
-	if (startAngle-endAngle<ANGLE_180 || !seg->linedef)  
+	if (startAngle-endAngle<ANGLE_180)  
 	{
+		return;
+	}
+
+	if (seg->sidedef == NULL)
+	{
+		if (!(currentsubsector->flags & SSECF_DRAWN))
+		{
+			if (clipper.SafeCheckRange(startAngle, endAngle)) 
+			{
+				currentsubsector->flags |= SSECF_DRAWN;
+			}
+		}
 		return;
 	}
 
@@ -93,14 +111,15 @@ static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
 	{
 		return;
 	}
+	currentsubsector->flags |= SSECF_DRAWN;
 
 	if (!seg->backsector)
 	{
 		clipper.SafeAddClipRange(startAngle, endAngle);
 	}
-	else if (!polysub)	// Two-sided polyobjects never obstruct the view
+	else if (!(seg->sidedef->Flags & WALLF_POLYOBJ))	// Two-sided polyobjects never obstruct the view
 	{
-		if (sector->sectornum == seg->backsector->sectornum)
+		if (currentsector->sectornum == seg->backsector->sectornum)
 		{
 			FTexture * tex = TexMan(seg->sidedef->GetTexture(side_t::mid));
 			if (!tex || tex->UseType==FTexture::TEX_Null) 
@@ -109,7 +128,7 @@ static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
 				seg->linedef->validcount=validcount;
 				return;
 			}
-			backsector=sector;
+			backsector=currentsector;
 		}
 		else
 		{
@@ -118,7 +137,7 @@ static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
 
 			backsector = gl_FakeFlat(seg->backsector, &bs, true);
 
-			if (gl_CheckClip(seg->sidedef, sector, backsector))
+			if (gl_CheckClip(seg->sidedef, currentsector, backsector))
 			{
 				clipper.SafeAddClipRange(startAngle, endAngle);
 			}
@@ -127,21 +146,22 @@ static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
 	else 
 	{
 		// Backsector for polyobj segs is always the containing sector itself
-		backsector = sector;
+		backsector = currentsector;
 	}
 
 	seg->linedef->flags |= ML_MAPPED;
 
-	if (seg->linedef->validcount!=validcount) 
+	if ((seg->sidedef->Flags & WALLF_POLYOBJ) || seg->linedef->validcount!=validcount) 
 	{
-		seg->linedef->validcount=validcount;
+		if (!(seg->sidedef->Flags & WALLF_POLYOBJ)) seg->linedef->validcount=validcount;
 
 		if (gl_render_walls)
 		{
 			SetupWall.Clock();
 
 			GLWall wall;
-			wall.Process(seg, sector, backsector, polysub);
+			wall.sub = currentsubsector;
+			wall.Process(seg, currentsector, backsector);
 			rendered_lines++;
 
 			SetupWall.Unclock();
@@ -151,35 +171,120 @@ static void AddLine (seg_t *seg,sector_t * sector,subsector_t * polysub)
 
 //==========================================================================
 //
-//
+// R_Subsector
+// Determine floor/ceiling planes.
+// Add sprites of things in sector.
+// Draw one or more line segments.
 //
 //==========================================================================
-static inline void AddLines(subsector_t * sub, sector_t * sector)
-{
-	ClipWall.Clock();
-	if (sub->poly)
-	{ // Render the polyobj in the subsector first
-		int polyCount = sub->poly->numsegs;
-		seg_t **polySeg = sub->poly->segs;
-		while (polyCount--)
-		{
-			AddLine (*polySeg++, sector, sub);
-		}
-	}
 
+static void PolySubsector(subsector_t * sub)
+{
 	int count = sub->numlines;
-	seg_t * line = &segs[sub->firstline];
+	seg_t * line = sub->firstline;
 
 	while (count--)
 	{
 		if (line->linedef)
 		{
-			if (!line->bPolySeg) AddLine (line, sector, NULL);
-		}
-		else
-		{
+			AddLine (line);
 		}
 		line++;
+	}
+}
+
+//==========================================================================
+//
+// RenderBSPNode
+// Renders all subsectors below a given node,
+//  traversing subtree recursively.
+// Just call with BSP root.
+//
+//==========================================================================
+
+static void RenderPolyBSPNode (void *node)
+{
+	while (!((size_t)node & 1))  // Keep going until found a subsector
+	{
+		node_t *bsp = (node_t *)node;
+
+		// Decide which side the view point is on.
+		int side = R_PointOnSide(viewx, viewy, bsp);
+
+		// Recursively divide front space (toward the viewer).
+		RenderPolyBSPNode (bsp->children[side]);
+
+		// Possibly divide back space (away from the viewer).
+		side ^= 1;
+
+		// It is not necessary to use the slower precise version here
+		if (!clipper.CheckBox(bsp->bbox[side]))
+		{
+			return;
+		}
+
+		node = bsp->children[side];
+	}
+	PolySubsector ((subsector_t *)((BYTE *)node - 1));
+}
+
+//==========================================================================
+//
+// Unlilke the software renderer this function will only draw the walls,
+// not the flats. Those are handled as a whole by the parent subsector.
+//
+//==========================================================================
+
+static void AddPolyobjs(subsector_t *sub)
+{
+	if (sub->BSP == NULL || sub->BSP->bDirty)
+	{
+		R_BuildPolyBSP(sub);
+	}
+	if (sub->BSP->Nodes.Size() == 0)
+	{
+		PolySubsector(&sub->BSP->Subsectors[0]);
+	}
+	else
+	{
+		RenderPolyBSPNode(&sub->BSP->Nodes.Last());
+	}
+}
+
+
+//==========================================================================
+//
+//
+//
+//==========================================================================
+
+static inline void AddLines(subsector_t * sub, sector_t * sector)
+{
+	currentsector = sector;
+	currentsubsector = sub;
+
+	ClipWall.Clock();
+	if (sub->polys != NULL)
+	{
+		AddPolyobjs(sub);
+	}
+	else
+	{
+		int count = sub->numlines;
+		seg_t * seg = sub->firstline;
+
+		while (count--)
+		{
+			if (seg->linedef == NULL)
+			{
+				if (!(sub->flags & SSECF_DRAWN)) AddLine (seg);
+			}
+			else if (!(seg->sidedef->Flags & WALLF_POLYOBJ)) 
+			{
+				AddLine (seg);
+			}
+			seg++;
+		}
 	}
 	ClipWall.Unclock();
 }
@@ -190,6 +295,7 @@ static inline void AddLines(subsector_t * sub, sector_t * sector)
 // R_RenderThings
 //
 //==========================================================================
+
 static inline void RenderThings(subsector_t * sub, sector_t * sector)
 {
 
@@ -205,6 +311,7 @@ static inline void RenderThings(subsector_t * sub, sector_t * sector)
 	}
 	SetupSprite.Unclock();
 }
+
 
 //==========================================================================
 //
@@ -241,7 +348,6 @@ static void DoSubsector(subsector_t * sub)
 
 	sector->MoreFlags |= SECF_DRAWN;
 	fakesector=gl_FakeFlat(sector, &fake, false);
-
 
 	if (sector->validcount != validcount)
 	{

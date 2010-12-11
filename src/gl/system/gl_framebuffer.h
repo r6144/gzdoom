@@ -27,7 +27,7 @@ class OpenGLFrameBuffer : public SDLGLFB
 public:
 
 	explicit OpenGLFrameBuffer() {}
-	OpenGLFrameBuffer(int width, int height, int bits, int refreshHz, bool fullscreen) ;
+	OpenGLFrameBuffer(void *hMonitor, int width, int height, int bits, int refreshHz, bool fullscreen) ;
 	~OpenGLFrameBuffer();
 
 	void InitializeState();
@@ -47,6 +47,7 @@ public:
 	void GetFlash(PalEntry &rgb, int &amount);
 	int GetPageCount();
 	bool Begin2D(bool copy3d);
+	void GetHitlist(BYTE *hitlist);
 
 	// Retrieves a buffer containing image data for a screenshot.
 	// Hint: Pitch can be negative for upside-down images, in which case buffer
@@ -65,6 +66,10 @@ public:
 	void Dim (PalEntry color, float damount, int x1, int y1, int w, int h);
 	void FlatFill (int left, int top, int right, int bottom, FTexture *src, bool local_origin=false);
 	void DrawRemainingPlayerSprites();
+
+	void FillSimplePoly(FTexture *tex, FVector2 *points, int npoints,
+		double originx, double originy, double scalex, double scaley,
+		angle_t rotation, FDynamicColormap *colormap, int lightlevel);
 
 	void PrecacheTexture(FTexture *tex, int cache);
 

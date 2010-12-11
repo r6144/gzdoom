@@ -66,6 +66,7 @@
 #include "v_font.h"
 #include "doomstat.h"
 #include "v_palette.h"
+#include "g_shared/a_specialspot.h"
 
 
 static FRandom pr_camissile ("CustomActorfire");
@@ -81,6 +82,7 @@ static FRandom pr_spawndebris ("SpawnDebris");
 static FRandom pr_spawnitemex ("SpawnItemEx");
 static FRandom pr_burst ("Burst");
 static FRandom pr_monsterrefire ("MonsterRefire");
+static FRandom pr_teleport("A_Teleport");
 
 
 //==========================================================================
@@ -346,6 +348,7 @@ static FRandom pr_seekermissile ("SeekerMissile");
 enum
 {
 	SMF_LOOK = 1,
+	SMF_PRECISE = 2,
 };
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SeekerMissile)
 {
@@ -360,7 +363,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SeekerMissile)
 	{
 		self->tracer = P_RoughMonsterSearch (self, distance);
 	}
-	P_SeekerMissile(self, clamp<int>(ang1, 0, 90) * ANGLE_1, clamp<int>(ang2, 0, 90) * ANGLE_1);
+	P_SeekerMissile(self, clamp<int>(ang1, 0, 90) * ANGLE_1, clamp<int>(ang2, 0, 90) * ANGLE_1, !!(flags & SMF_PRECISE));
 }
 
 //==========================================================================
@@ -469,30 +472,16 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfHealthLower)
 // State jump function
 //
 //==========================================================================
-DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfCloser)
+void DoJumpIfCloser(AActor *target, DECLARE_PARAMINFO)
 {
 	ACTION_PARAM_START(2);
 	ACTION_PARAM_FIXED(dist, 0);
 	ACTION_PARAM_STATE(jump, 1);
 
-	AActor *target;
-
-	if (!self->player)
-	{
-		target=self->target;
-	}
-	else
-	{
-		// Does the player aim at something that can be shot?
-		P_BulletSlope(self, &target);
-	}
-
 	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
 
 	// No target - no jump
-	if (target==NULL) return;
-
-	if (P_AproxDistance(self->x-target->x, self->y-target->y) < dist &&
+	if (target != NULL && P_AproxDistance(self->x-target->x, self->y-target->y) < dist &&
 		( (self->z > target->z && self->z - (target->z + target->height) < dist) || 
 		  (self->z <=target->z && target->z - (self->z + self->height) < dist) 
 		)
@@ -500,6 +489,36 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfCloser)
 	{
 		ACTION_JUMP(jump);
 	}
+}
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfCloser)
+{
+	AActor *target;
+
+	if (!self->player)
+	{
+		target = self->target;
+	}
+	else
+	{
+		// Does the player aim at something that can be shot?
+		P_BulletSlope(self, &target);
+	}
+	DoJumpIfCloser(target, PUSH_PARAMINFO);
+}
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTracerCloser)
+{
+	// Is there really any reason to limit this to seeker missiles?
+	if (self->flags2 & MF2_SEEKERMISSILE)
+	{
+		DoJumpIfCloser(self->tracer, PUSH_PARAMINFO);
+	}
+}
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfMasterCloser)
+{
+	DoJumpIfCloser(self->master, PUSH_PARAMINFO);
 }
 
 //==========================================================================
@@ -802,6 +821,14 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomMissile)
 // An even more customizable hitscan attack
 //
 //==========================================================================
+enum CBA_Flags
+{
+	CBAF_AIMFACING = 1,
+	CBAF_NORANDOM = 2,
+	CBAF_EXPLICITANGLE = 4,
+	CBAF_NOPITCH = 8,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomBulletAttack)
 {
 	ACTION_PARAM_START(7);
@@ -811,7 +838,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomBulletAttack)
 	ACTION_PARAM_INT(DamagePerBullet, 3);
 	ACTION_PARAM_CLASS(pufftype, 4);
 	ACTION_PARAM_FIXED(Range, 5);
-	ACTION_PARAM_BOOL(AimFacing, 6);
+	ACTION_PARAM_INT(Flags, 6);
 
 	if(Range==0) Range=MISSILERANGE;
 
@@ -819,21 +846,37 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomBulletAttack)
 	int bangle;
 	int bslope;
 
-	if (self->target || AimFacing)
+	if (self->target || (Flags & CBAF_AIMFACING))
 	{
-		if (!AimFacing) A_FaceTarget (self);
+		if (!(Flags & CBAF_AIMFACING)) A_FaceTarget (self);
 		bangle = self->angle;
 
 		if (!pufftype) pufftype = PClass::FindClass(NAME_BulletPuff);
 
-		bslope = P_AimLineAttack (self, bangle, MISSILERANGE);
+		if (!(Flags & CBAF_NOPITCH)) bslope = P_AimLineAttack (self, bangle, MISSILERANGE);
 
 		S_Sound (self, CHAN_WEAPON, self->AttackSound, 1, ATTN_NORM);
 		for (i=0 ; i<NumBullets ; i++)
 		{
-			int angle = bangle + pr_cabullet.Random2() * (Spread_XY / 255);
-			int slope = bslope + pr_cabullet.Random2() * (Spread_Z / 255);
-			int damage = ((pr_cabullet()%3)+1) * DamagePerBullet;
+			int angle = bangle;
+			int slope = bslope;
+
+			if (Flags & CBAF_EXPLICITANGLE)
+			{
+				angle += Spread_XY;
+				slope += Spread_Z;
+			}
+			else
+			{
+				angle += pr_cwbullet.Random2() * (Spread_XY / 255);
+				slope += pr_cwbullet.Random2() * (Spread_Z / 255);
+			}
+
+			int damage = DamagePerBullet;
+
+			if (!(Flags & CBAF_NORANDOM))
+				damage *= ((pr_cabullet()%3)+1);
+
 			P_LineAttack(self, angle, Range, slope, damage, NAME_None, pufftype);
 		}
     }
@@ -947,6 +990,15 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfNoAmmo)
 // An even more customizable hitscan attack
 //
 //==========================================================================
+enum FB_Flags
+{
+	FBF_USEAMMO = 1,
+	FBF_NORANDOM = 2,
+	FBF_EXPLICITANGLE = 4,
+	FBF_NOPITCH = 8,
+	FBF_NOFLASH = 16,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireBullets)
 {
 	ACTION_PARAM_START(7);
@@ -955,7 +1007,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireBullets)
 	ACTION_PARAM_INT(NumberOfBullets, 2);
 	ACTION_PARAM_INT(DamagePerBullet, 3);
 	ACTION_PARAM_CLASS(PuffType, 4);
-	ACTION_PARAM_BOOL(UseAmmo, 5);
+	ACTION_PARAM_INT(Flags, 5);
 	ACTION_PARAM_FIXED(Range, 6);
 
 	if (!self->player) return;
@@ -967,16 +1019,16 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireBullets)
 	int bangle;
 	int bslope;
 
-	if (UseAmmo && weapon)
+	if ((Flags & FBF_USEAMMO) && weapon)
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true)) return;	// out of ammo
 	}
 	
 	if (Range == 0) Range = PLAYERMISSILERANGE;
 
-	static_cast<APlayerPawn *>(self)->PlayAttacking2 ();
+	if (!(Flags & FBF_NOFLASH)) static_cast<APlayerPawn *>(self)->PlayAttacking2 ();
 
-	bslope = P_BulletSlope(self);
+	if (!(Flags & FBF_NOPITCH)) bslope = P_BulletSlope(self);
 	bangle = self->angle;
 
 	if (!PuffType) PuffType = PClass::FindClass(NAME_BulletPuff);
@@ -985,7 +1037,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireBullets)
 
 	if ((NumberOfBullets==1 && !player->refire) || NumberOfBullets==0)
 	{
-		int damage = ((pr_cwbullet()%3)+1)*DamagePerBullet;
+		int damage = DamagePerBullet;
+
+		if (!(Flags & FBF_NORANDOM))
+			damage *= ((pr_cwbullet()%3)+1);
+
 		P_LineAttack(self, bangle, Range, bslope, damage, NAME_None, PuffType);
 	}
 	else 
@@ -993,9 +1049,25 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireBullets)
 		if (NumberOfBullets == -1) NumberOfBullets = 1;
 		for (i=0 ; i<NumberOfBullets ; i++)
 		{
-			int angle = bangle + pr_cwbullet.Random2() * (Spread_XY / 255);
-			int slope = bslope + pr_cwbullet.Random2() * (Spread_Z / 255);
-			int damage = ((pr_cwbullet()%3)+1) * DamagePerBullet;
+			int angle = bangle;
+			int slope = bslope;
+
+			if (Flags & FBF_EXPLICITANGLE)
+			{
+				angle += Spread_XY;
+				slope += Spread_Z;
+			}
+			else
+			{
+				angle += pr_cwbullet.Random2() * (Spread_XY / 255);
+				slope += pr_cwbullet.Random2() * (Spread_Z / 255);
+			}
+
+			int damage = DamagePerBullet;
+
+			if (!(Flags & FBF_NORANDOM))
+				damage *= ((pr_cwbullet()%3)+1);
+
 			P_LineAttack(self, angle, Range, slope, damage, NAME_None, PuffType);
 		}
 	}
@@ -1071,14 +1143,23 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FireCustomMissile)
 // Berserk is not handled here. That can be done with A_CheckIfInventory
 //
 //==========================================================================
+
+enum
+{
+	CPF_USEAMMO = 1,
+	CPF_DAGGER = 2,
+	CPF_PULLIN = 4,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 {
 	ACTION_PARAM_START(5);
 	ACTION_PARAM_INT(Damage, 0);
 	ACTION_PARAM_BOOL(norandom, 1);
-	ACTION_PARAM_BOOL(UseAmmo, 2);
+	ACTION_PARAM_INT(flags, 2);
 	ACTION_PARAM_CLASS(PuffType, 3);
 	ACTION_PARAM_FIXED(Range, 4);
+	ACTION_PARAM_FIXED(LifeSteal, 5);
 
 	if (!self->player) return;
 
@@ -1097,24 +1178,31 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 	pitch = P_AimLineAttack (self, angle, Range, &linetarget);
 
 	// only use ammo when actually hitting something!
-	if (UseAmmo && linetarget && weapon)
+	if ((flags & CPF_USEAMMO) && linetarget && weapon)
 	{
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true)) return;	// out of ammo
 	}
 
 	if (!PuffType) PuffType = PClass::FindClass(NAME_BulletPuff);
 
-	P_LineAttack (self, angle, Range, pitch, Damage, NAME_None, PuffType, true);
+	P_LineAttack (self, angle, Range, pitch, Damage, NAME_None, PuffType, true, &linetarget);
 
 	// turn to face target
 	if (linetarget)
 	{
+		if (LifeSteal)
+			P_GiveBody (self, (Damage * LifeSteal) >> FRACBITS);
+
 		S_Sound (self, CHAN_WEAPON, weapon->AttackSound, 1, ATTN_NORM);
 
 		self->angle = R_PointToAngle2 (self->x,
 										self->y,
 										linetarget->x,
 										linetarget->y);
+
+		if (flags & CPF_PULLIN) self->flags |= MF_JUSTATTACKED;
+		if (flags & CPF_DAGGER) P_DaggerAlert (self, linetarget);
+
 	}
 }
 
@@ -1122,7 +1210,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomPunch)
 enum
 {	
 	RAF_SILENT = 1,
-	RAF_NOPIERCE = 2
+	RAF_NOPIERCE = 2,
+	RAF_EXPLICITANGLE = 4,
 };
 
 //==========================================================================
@@ -1132,7 +1221,7 @@ enum
 //==========================================================================
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 {
-	ACTION_PARAM_START(8);
+	ACTION_PARAM_START(10);
 	ACTION_PARAM_INT(Damage, 0);
 	ACTION_PARAM_INT(Spawnofs_XY, 1);
 	ACTION_PARAM_BOOL(UseAmmo, 2);
@@ -1140,7 +1229,9 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 	ACTION_PARAM_COLOR(Color2, 4);
 	ACTION_PARAM_INT(Flags, 5);
 	ACTION_PARAM_FLOAT(MaxDiff, 6);
-	ACTION_PARAM_CLASS(PuffType, 7);	
+	ACTION_PARAM_CLASS(PuffType, 7);
+	ACTION_PARAM_ANGLE(Spread_XY, 8);
+	ACTION_PARAM_ANGLE(Spread_Z, 9);
 
 	if (!self->player) return;
 
@@ -1152,7 +1243,21 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_RailAttack)
 		if (!weapon->DepleteAmmo(weapon->bAltFire, true)) return;	// out of ammo
 	}
 
-	P_RailAttack (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)));
+	angle_t angle;
+	angle_t slope;
+
+	if (Flags & RAF_EXPLICITANGLE)
+	{
+		angle = Spread_XY;
+		slope = Spread_Z;
+	}
+	else
+	{
+		angle = pr_crailgun.Random2() * (Spread_XY / 255);
+		slope = pr_crailgun.Random2() * (Spread_Z / 255);
+	}
+
+	P_RailAttack (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)), angle, slope);
 }
 
 //==========================================================================
@@ -1164,12 +1269,13 @@ enum
 {
 	CRF_DONTAIM = 0,
 	CRF_AIMPARALLEL = 1,
-	CRF_AIMDIRECT = 2
+	CRF_AIMDIRECT = 2,
+	CRF_EXPLICITANGLE = 4,
 };
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 {
-	ACTION_PARAM_START(8);
+	ACTION_PARAM_START(10);
 	ACTION_PARAM_INT(Damage, 0);
 	ACTION_PARAM_INT(Spawnofs_XY, 1);
 	ACTION_PARAM_COLOR(Color1, 2);
@@ -1178,6 +1284,8 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 	ACTION_PARAM_INT(aim, 5);
 	ACTION_PARAM_FLOAT(MaxDiff, 6);
 	ACTION_PARAM_CLASS(PuffType, 7);
+	ACTION_PARAM_ANGLE(Spread_XY, 8);
+	ACTION_PARAM_ANGLE(Spread_Z, 9);
 
 	AActor *linetarget;
 
@@ -1244,7 +1352,21 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_CustomRailgun)
 
 	angle_t angle = (self->angle - ANG90) >> ANGLETOFINESHIFT;
 
-	P_RailAttack (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)));
+	angle_t angleoffset;
+	angle_t slopeoffset;
+
+	if (Flags & CRF_EXPLICITANGLE)
+	{
+		angleoffset = Spread_XY;
+		slopeoffset = Spread_Z;
+	}
+	else
+	{
+		angleoffset = pr_crailgun.Random2() * (Spread_XY / 255);
+		slopeoffset = pr_crailgun.Random2() * (Spread_Z / 255);
+	}
+
+	P_RailAttack (self, Damage, Spawnofs_XY, Color1, Color2, MaxDiff, (Flags & RAF_SILENT), PuffType, (!(Flags & RAF_NOPIERCE)), angleoffset, slopeoffset);
 
 	self->x = saved_x;
 	self->y = saved_y;
@@ -1280,11 +1402,7 @@ static void DoGiveInventory(AActor * receiver, DECLARE_PARAMINFO)
 			item->Amount = amount;
 		}
 		item->flags |= MF_DROPPED;
-		if (item->flags & MF_COUNTITEM)
-		{
-			item->flags&=~MF_COUNTITEM;
-			level.total_items--;
-		}
+		item->ClearCounters();
 		if (!item->CallTryPickup (receiver))
 		{
 			item->Destroy ();
@@ -1313,11 +1431,17 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_GiveToTarget)
 //
 //===========================================================================
 
+enum
+{
+	TIF_NOTAKEINFINITE = 1,
+};
+
 void DoTakeInventory(AActor * receiver, DECLARE_PARAMINFO)
 {
-	ACTION_PARAM_START(2);
+	ACTION_PARAM_START(3);
 	ACTION_PARAM_CLASS(item, 0);
 	ACTION_PARAM_INT(amount, 1);
+	ACTION_PARAM_INT(flags, 2);
 	
 	if (item == NULL || receiver == NULL) return;
 
@@ -1331,7 +1455,15 @@ void DoTakeInventory(AActor * receiver, DECLARE_PARAMINFO)
 		{
 			res = true;
 		}
-		if (!amount || amount>=inv->Amount) 
+		// Do not take ammo if the "no take infinite/take as ammo depletion" flag is set
+		// and infinite ammo is on
+		if (flags & TIF_NOTAKEINFINITE &&
+			((dmflags & DF_INFINITE_AMMO) || (receiver->player->cheats & CF_INFINITEAMMO)) &&
+			inv->IsKindOf(RUNTIME_CLASS(AAmmo)))
+		{
+			// Nothing to do here, except maybe res = false;? Would it make sense?
+		}
+		else if (!amount || amount>=inv->Amount) 
 		{
 			if (inv->ItemFlags&IF_KEEPDEPLETED) inv->Amount=0;
 			else inv->Destroy();
@@ -1405,7 +1537,7 @@ static bool InitSpawnedItem(AActor *self, AActor *mo, int flags)
 			if (!(flags&SIXF_NOCHECKPOSITION) && !P_TestMobjLocation(mo))
 			{
 				// The monster is blocked so don't spawn it at all!
-				if (mo->CountsAsKill()) level.total_monsters--;
+				mo->ClearCounters();
 				mo->Destroy();
 				return false;
 			}
@@ -1721,6 +1853,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Print)
 		C_MidPrint(font != NULL ? font : SmallFont, formatted.GetChars());
 		con_midtime = saved;
 	}
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
 }
 
 //===========================================================================
@@ -1751,6 +1884,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_PrintBold)
 	FString formatted = strbin1(text);
 	C_MidPrintBold(font != NULL ? font : SmallFont, formatted.GetChars());
 	con_midtime = saved;
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
 }
 
 //===========================================================================
@@ -1764,6 +1898,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Log)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_STRING(text, 0);
 	Printf("%s\n", text);
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
 }
 
 //===========================================================================
@@ -1777,6 +1912,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_LogInt)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_INT(num, 0);
 	Printf("%d\n", num);
+	ACTION_SET_RESULT(false);	// Prints should never set the result for inventory state chains!
 }
 
 //===========================================================================
@@ -1809,11 +1945,13 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeIn)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_FIXED(reduce, 0);
 
-	if (reduce == 0) reduce = FRACUNIT/10;
-
+	if (reduce == 0)
+	{
+		reduce = FRACUNIT/10;
+	}
 	self->RenderStyle.Flags &= ~STYLEF_Alpha1;
 	self->alpha += reduce;
-	//if (self->alpha<=0) self->Destroy();
+	// Should this clamp alpha to 1.0?
 }
 
 //===========================================================================
@@ -1829,11 +1967,57 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeOut)
 	ACTION_PARAM_FIXED(reduce, 0);
 	ACTION_PARAM_BOOL(remove, 1);
 
-	if (reduce == 0) reduce = FRACUNIT/10;
-
+	if (reduce == 0)
+	{
+		reduce = FRACUNIT/10;
+	}
 	self->RenderStyle.Flags &= ~STYLEF_Alpha1;
 	self->alpha -= reduce;
-	if (self->alpha<=0 && remove) self->Destroy();
+	if (self->alpha <= 0 && remove)
+	{
+		self->Destroy();
+	}
+}
+
+//===========================================================================
+//
+// A_FadeTo
+//
+// fades the actor to a specified transparency by a specified amount and
+// destroys it if so desired
+//
+//===========================================================================
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_FadeTo)
+{
+	ACTION_PARAM_START(3);
+	ACTION_PARAM_FIXED(target, 0);
+	ACTION_PARAM_FIXED(amount, 1);
+	ACTION_PARAM_BOOL(remove, 2);
+
+	self->RenderStyle.Flags &= ~STYLEF_Alpha1;
+
+	if (self->alpha > target)
+	{
+		self->alpha -= amount;
+
+		if (self->alpha < target)
+		{
+			self->alpha = target;
+		}
+	}
+	else if (self->alpha < target)
+	{
+		self->alpha += amount;
+
+		if (self->alpha > target)
+		{
+			self->alpha = target;
+		}
+	}
+	if (self->alpha == target && remove)
+	{
+		self->Destroy();
+	}
 }
 
 //===========================================================================
@@ -2118,47 +2302,47 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Burst)
 	ACTION_PARAM_START(1);
 	ACTION_PARAM_CLASS(chunk, 0);
 
-   int i, numChunks;
-   AActor * mo;
+	int i, numChunks;
+	AActor * mo;
 
-   if (chunk == NULL) return;
+	if (chunk == NULL) return;
 
-   self->velx = self->vely = self->velz = 0;
-   self->height = self->GetDefault()->height;
+	self->velx = self->vely = self->velz = 0;
+	self->height = self->GetDefault()->height;
 
-   // [RH] In Hexen, this creates a random number of shards (range [24,56])
-   // with no relation to the size of the self shattering. I think it should
-   // base the number of shards on the size of the dead thing, so bigger
-   // things break up into more shards than smaller things.
-   // An self with radius 20 and height 64 creates ~40 chunks.
-   numChunks = MAX<int> (4, (self->radius>>FRACBITS)*(self->height>>FRACBITS)/32);
-   i = (pr_burst.Random2()) % (numChunks/4);
-   for (i = MAX (24, numChunks + i); i >= 0; i--)
-   {
-      mo = Spawn(chunk,
-         self->x + (((pr_burst()-128)*self->radius)>>7),
-         self->y + (((pr_burst()-128)*self->radius)>>7),
-         self->z + (pr_burst()*self->height/255), ALLOW_REPLACE);
+	// [RH] In Hexen, this creates a random number of shards (range [24,56])
+	// with no relation to the size of the self shattering. I think it should
+	// base the number of shards on the size of the dead thing, so bigger
+	// things break up into more shards than smaller things.
+	// An self with radius 20 and height 64 creates ~40 chunks.
+	numChunks = MAX<int> (4, (self->radius>>FRACBITS)*(self->height>>FRACBITS)/32);
+	i = (pr_burst.Random2()) % (numChunks/4);
+	for (i = MAX (24, numChunks + i); i >= 0; i--)
+	{
+		mo = Spawn(chunk,
+			self->x + (((pr_burst()-128)*self->radius)>>7),
+			self->y + (((pr_burst()-128)*self->radius)>>7),
+			self->z + (pr_burst()*self->height/255), ALLOW_REPLACE);
 
-	  if (mo)
-      {
-         mo->velz = FixedDiv(mo->z - self->z, self->height)<<2;
-         mo->velx = pr_burst.Random2 () << (FRACBITS-7);
-         mo->vely = pr_burst.Random2 () << (FRACBITS-7);
-         mo->RenderStyle = self->RenderStyle;
-         mo->alpha = self->alpha;
-		 mo->CopyFriendliness(self, true);
-      }
-   }
+		if (mo)
+		{
+			mo->velz = FixedDiv(mo->z - self->z, self->height)<<2;
+			mo->velx = pr_burst.Random2 () << (FRACBITS-7);
+			mo->vely = pr_burst.Random2 () << (FRACBITS-7);
+			mo->RenderStyle = self->RenderStyle;
+			mo->alpha = self->alpha;
+			mo->CopyFriendliness(self, true);
+		}
+	}
 
-   // [RH] Do some stuff to make this more useful outside Hexen
-   if (self->flags4 & MF4_BOSSDEATH)
-   {
+	// [RH] Do some stuff to make this more useful outside Hexen
+	if (self->flags4 & MF4_BOSSDEATH)
+	{
 		CALL_ACTION(A_BossDeath, self);
-   }
-   CALL_ACTION(A_NoBlocking, self);
+	}
+	A_Unblock(self, true);
 
-   self->Destroy ();
+	self->Destroy ();
 }
 
 //===========================================================================
@@ -2356,23 +2540,38 @@ DEFINE_ACTION_FUNCTION(AActor, A_ClearTarget)
 
 //==========================================================================
 //
-// A_JumpIfTargetInLOS (state label, optional fixed fov, optional bool
-// projectiletarget)
+// A_JumpIfTargetInLOS (state label, optional fixed fov, optional int flags,
+// optional fixed dist_max, optional fixed dist_close)
 //
 // Jumps if the actor can see its target, or if the player has a linetarget.
 // ProjectileTarget affects how projectiles are treated. If set, it will use
 // the target of the projectile for seekers, and ignore the target for
 // normal projectiles. If not set, it will use the missile's owner instead
-// (the default).
+// (the default). ProjectileTarget is now flag JLOSF_PROJECTILE. dist_max
+// sets the maximum distance that actor can see, 0 means forever. dist_close
+// uses special behavior if certain flags are set, 0 means no checks.
 //
 //==========================================================================
 
+enum JLOS_flags
+{
+	JLOSF_PROJECTILE=1,
+	JLOSF_NOSIGHT=2,
+	JLOSF_CLOSENOFOV=4,
+	JLOSF_CLOSENOSIGHT=8,
+	JLOSF_CLOSENOJUMP=16,
+	JLOSF_DEADNOJUMP=32,
+	JLOSF_CHECKMASTER=64,
+};
+
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 {
-	ACTION_PARAM_START(3);
+	ACTION_PARAM_START(5);
 	ACTION_PARAM_STATE(jump, 0);
 	ACTION_PARAM_ANGLE(fov, 1);
-	ACTION_PARAM_BOOL(projtarg, 2);
+	ACTION_PARAM_INT(flags, 2);
+	ACTION_PARAM_FIXED(dist_max, 3);
+	ACTION_PARAM_FIXED(dist_close, 4);
 
 	angle_t an;
 	AActor *target;
@@ -2381,7 +2580,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 
 	if (!self->player)
 	{
-		if (self->flags & MF_MISSILE && projtarg)
+		if (flags & JLOSF_CHECKMASTER)
+		{
+			target = self->master;
+		}
+		else if (self->flags & MF_MISSILE && (flags & JLOSF_PROJECTILE))
 		{
 			if (self->flags2 & MF2_SEEKERMISSILE)
 				target = self->tracer;
@@ -2395,7 +2598,28 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 
 		if (!target) return; // [KS] Let's not call P_CheckSight unnecessarily in this case.
 
-		if (!P_CheckSight (self, target, SF_IGNOREVISIBILITY))
+		if ((flags & JLOSF_DEADNOJUMP) && (target->health <= 0)) return;
+
+		fixed_t distance = P_AproxDistance(target->x - self->x, target->y - self->y);
+		distance = P_AproxDistance(distance, target->z - self->z);
+
+		if (dist_max && (distance > dist_max)) return;
+
+		bool doCheckSight = !(flags & JLOSF_NOSIGHT);
+
+		if (dist_close && (distance < dist_close))
+		{
+			if (flags & JLOSF_CLOSENOJUMP)
+				return;
+
+			if (flags & JLOSF_CLOSENOFOV)
+				fov = 0;
+
+			if (flags & JLOSF_CLOSENOSIGHT)
+				doCheckSight = false;
+		}
+
+		if (doCheckSight && !P_CheckSight (self, target, SF_IGNOREVISIBILITY))
 			return;
 
 		if (fov && (fov < ANGLE_MAX))
@@ -2417,9 +2641,20 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 	{
 		// Does the player aim at something that can be shot?
 		P_BulletSlope(self, &target);
-	}
 
-	if (!target) return;
+		if (!target) return;
+
+		fixed_t distance = P_AproxDistance(target->x - self->x, target->y - self->y);
+		distance = P_AproxDistance(distance, target->z - self->z);
+
+		if (dist_max && (distance > dist_max)) return;
+
+		if (dist_close && (distance < dist_close))
+		{
+			if (flags & JLOSF_CLOSENOJUMP)
+				return;
+		}
+	}
 
 	ACTION_JUMP(jump);
 }
@@ -2427,24 +2662,30 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfTargetInLOS)
 
 //==========================================================================
 //
-// A_JumpIfInTargetLOS (state label, optional fixed fov, optional bool
-// projectiletarget)
+// A_JumpIfInTargetLOS (state label, optional fixed fov, optional int flags
+// optional fixed dist_max, optional fixed dist_close)
 //
 //==========================================================================
 
 DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfInTargetLOS)
 {
-	ACTION_PARAM_START(3);
+	ACTION_PARAM_START(5);
 	ACTION_PARAM_STATE(jump, 0);
 	ACTION_PARAM_ANGLE(fov, 1);
-	ACTION_PARAM_BOOL(projtarg, 2);
+	ACTION_PARAM_INT(flags, 2);
+	ACTION_PARAM_FIXED(dist_max, 3);
+	ACTION_PARAM_FIXED(dist_close, 4);
 
 	angle_t an;
 	AActor *target;
 
 	ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
 
-	if (self->flags & MF_MISSILE && projtarg)
+	if (flags & JLOSF_CHECKMASTER)
+	{
+		target = self->master;
+	}
+	else if (self->flags & MF_MISSILE && (flags & JLOSF_PROJECTILE))
 	{
 		if (self->flags2 & MF2_SEEKERMISSILE)
 			target = self->tracer;
@@ -2458,7 +2699,28 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_JumpIfInTargetLOS)
 
 	if (!target) return; // [KS] Let's not call P_CheckSight unnecessarily in this case.
 
-	if (!P_CheckSight (target, self, SF_IGNOREVISIBILITY))
+	if ((flags & JLOSF_DEADNOJUMP) && (target->health <= 0)) return;
+
+	fixed_t distance = P_AproxDistance(target->x - self->x, target->y - self->y);
+	distance = P_AproxDistance(distance, target->z - self->z);
+
+	if (dist_max && (distance > dist_max)) return;
+
+	bool doCheckSight = !(flags & JLOSF_NOSIGHT);
+
+	if (dist_close && (distance < dist_close))
+	{
+		if (flags & JLOSF_CLOSENOJUMP)
+			return;
+
+		if (flags & JLOSF_CLOSENOFOV)
+			fov = 0;
+
+		if (flags & JLOSF_CLOSENOSIGHT)
+			doCheckSight = false;
+	}
+
+	if (doCheckSight && !P_CheckSight (target, self, SF_IGNOREVISIBILITY))
 		return;
 
 	if (fov && (fov < ANGLE_MAX))
@@ -2659,9 +2921,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeFlag)
 	{
 		bool kill_before, kill_after;
 		INTBOOL item_before, item_after;
+		INTBOOL secret_before, secret_after;
 
 		kill_before = self->CountsAsKill();
 		item_before = self->flags & MF_COUNTITEM;
+		secret_before = self->flags5 & MF5_COUNTSECRET;
 
 		if (fd->structoffset == -1)
 		{
@@ -2687,6 +2951,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeFlag)
 		}
 		kill_after = self->CountsAsKill();
 		item_after = self->flags & MF_COUNTITEM;
+		secret_after = self->flags5 & MF5_COUNTSECRET;
 		// Was this monster previously worth a kill but no longer is?
 		// Or vice versa?
 		if (kill_before != kill_after)
@@ -2710,6 +2975,18 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_ChangeFlag)
 			else
 			{ // It no longer counts as an item
 				level.total_items--;
+			}
+		}
+		// and secretd
+		if (secret_before != secret_after)
+		{
+			if (secret_after)
+			{ // It counts as an secret now.
+				level.total_secrets++;
+			}
+			else
+			{ // It no longer counts as an secret
+				level.total_secrets--;
 			}
 		}
 	}
@@ -2847,7 +3124,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_MonsterRefire)
 	if (!self->target
 		|| P_HitFriend (self)
 		|| self->target->health <= 0
-		|| !P_CheckSight (self, self->target, 0) )
+		|| !P_CheckSight (self, self->target, SF_SEEPASTBLOCKEVERYTHING|SF_SEEPASTSHOOTABLELINES) )
 	{
 		ACTION_JUMP(jump);
 	}
@@ -3009,7 +3286,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetUserVar)
 	ACTION_PARAM_NAME(varname, 0);
 	ACTION_PARAM_INT(value, 1);	
 
-	PSymbol *sym = stateowner->GetClass()->Symbols.FindSymbol(varname, true);
+	PSymbol *sym = self->GetClass()->Symbols.FindSymbol(varname, true);
 	PSymbolVariable *var;
 
 	if (sym == NULL || sym->SymbolType != SYM_Variable ||
@@ -3017,11 +3294,11 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetUserVar)
 		var->ValueType.Type != VAL_Int)
 	{
 		Printf("%s is not a user variable in class %s\n", varname.GetChars(),
-			stateowner->GetClass()->TypeName.GetChars());
+			self->GetClass()->TypeName.GetChars());
 		return;
 	}
 	// Set the value of the specified user variable.
-	*(int *)(reinterpret_cast<BYTE *>(stateowner) + var->offset) = value;
+	*(int *)(reinterpret_cast<BYTE *>(self) + var->offset) = value;
 }
 
 //===========================================================================
@@ -3037,7 +3314,7 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetUserArray)
 	ACTION_PARAM_INT(pos, 1);
 	ACTION_PARAM_INT(value, 2);
 
-	PSymbol *sym = stateowner->GetClass()->Symbols.FindSymbol(varname, true);
+	PSymbol *sym = self->GetClass()->Symbols.FindSymbol(varname, true);
 	PSymbolVariable *var;
 
 	if (sym == NULL || sym->SymbolType != SYM_Variable ||
@@ -3045,17 +3322,98 @@ DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_SetUserArray)
 		var->ValueType.Type != VAL_Array || var->ValueType.BaseType != VAL_Int)
 	{
 		Printf("%s is not a user array in class %s\n", varname.GetChars(),
-			stateowner->GetClass()->TypeName.GetChars());
+			self->GetClass()->TypeName.GetChars());
 		return;
 	}
 	if (pos < 0 || pos >= var->ValueType.size)
 	{
 		Printf("%d is out of bounds in array %s in class %s\n", pos, varname.GetChars(),
-			stateowner->GetClass()->TypeName.GetChars());
+			self->GetClass()->TypeName.GetChars());
 		return;
 	}
 	// Set the value of the specified user array at index pos.
-	((int *)(reinterpret_cast<BYTE *>(stateowner) + var->offset))[pos] = value;
+	((int *)(reinterpret_cast<BYTE *>(self) + var->offset))[pos] = value;
+}
+
+//===========================================================================
+//
+// A_Teleport(optional state teleportstate, optional class targettype,
+// optional class fogtype, optional int flags, optional fixed mindist,
+// optional fixed maxdist)
+//
+// Attempts to teleport to a targettype at least mindist away and at most
+// maxdist away (0 means unlimited). If successful, spawn a fogtype at old
+// location and place calling actor in teleportstate. 
+//
+//===========================================================================
+enum T_Flags
+{
+	TF_TELEFRAG = 1, // Allow telefrag in order to teleport.
+	TF_RANDOMDECIDE = 2, // Randomly fail based on health. (A_Srcr2Decide)
+};
+
+DEFINE_ACTION_FUNCTION_PARAMS(AActor, A_Teleport)
+{
+	ACTION_PARAM_START(6);
+	ACTION_PARAM_STATE(TeleportState, 0);
+	ACTION_PARAM_CLASS(TargetType, 1);
+	ACTION_PARAM_CLASS(FogType, 2);
+	ACTION_PARAM_INT(Flags, 3);
+	ACTION_PARAM_FIXED(MinDist, 4);
+	ACTION_PARAM_FIXED(MaxDist, 5);
+
+	// Randomly choose not to teleport like A_Srcr2Decide.
+	if (Flags & TF_RANDOMDECIDE)
+	{
+		static const int chance[] =
+		{
+			192, 120, 120, 120, 64, 64, 32, 16, 0
+		};
+
+		unsigned int chanceindex = self->health / ((self->SpawnHealth()/8 == 0) ? 1 : self->SpawnHealth()/8);
+
+		if (chanceindex >= countof(chance))
+		{
+			chanceindex = countof(chance) - 1;
+		}
+
+		if (pr_teleport() >= chance[chanceindex]) return;
+	}
+
+	if (TeleportState == NULL)
+	{
+		// Default to Teleport.
+		TeleportState = self->FindState("Teleport");
+		// If still nothing, then return.
+		if (!TeleportState) return;
+	}
+
+	DSpotState *state = DSpotState::GetSpotState();
+	if (state == NULL) return;
+
+	if (!TargetType) TargetType = PClass::FindClass("BossSpot");
+
+	AActor * spot = state->GetSpotWithMinMaxDistance(TargetType, self->x, self->y, MinDist, MaxDist);
+	if (spot == NULL) return;
+
+	fixed_t prevX = self->x;
+	fixed_t prevY = self->y;
+	fixed_t prevZ = self->z;
+	if (P_TeleportMove (self, spot->x, spot->y, spot->z, Flags & TF_TELEFRAG))
+	{
+		ACTION_SET_RESULT(false);	// Jumps should never set the result for inventory state chains!
+
+		if (FogType)
+		{
+			Spawn(FogType, prevX, prevY, prevZ, ALLOW_REPLACE);
+		}
+
+		ACTION_JUMP(TeleportState);
+
+		self->z = self->floorz;
+		self->angle = spot->angle;
+		self->velx = self->vely = self->velz = 0;
+	}
 }
 
 //===========================================================================

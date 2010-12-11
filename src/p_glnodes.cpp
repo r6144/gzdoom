@@ -2,7 +2,7 @@
 ** gl_nodes.cpp
 **
 **---------------------------------------------------------------------------
-** Copyright 2005 Christoph Oelckers
+** Copyright 2005-2010 Christoph Oelckers
 ** All rights reserved.
 **
 ** Redistribution and use in source and binary forms, with or without
@@ -16,12 +16,6 @@
 **    documentation and/or other materials provided with the distribution.
 ** 3. The name of the author may not be used to endorse or promote products
 **    derived from this software without specific prior written permission.
-** 4. When not used as part of GZDoom or a GZDoom derivative, this code will be
-**    covered by the terms of the GNU Lesser General Public License as published
-**    by the Free Software Foundation; either version 2.1 of the License, or (at
-**    your option) any later version.
-** 5. Full disclosure of the entire project's source code, except for third
-**    party libraries is mandatory. (NOTE: This clause is non-negotiable!)
 **
 ** THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
 ** IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -41,9 +35,31 @@
 #include <malloc.h>		// for alloca()
 #endif
 
+#ifndef _WIN32
+#include <unistd.h>
+
+#else
+#include <direct.h>
+
+#define rmdir _rmdir
+
+// TODO, maybe: stop using DWORD so I don't need to worry about conflicting
+// with Windows' typedef. Then I could just include the header file instead
+// of declaring everything here.
+#define MAX_PATH				260
+#define CSIDL_LOCAL_APPDATA		0x001c
+extern "C" __declspec(dllimport) long __stdcall SHGetFolderPathA(void *hwnd, int csidl, void *hToken, unsigned long dwFlags, char *pszPath);
+
+#endif
+
+#ifdef __APPLE__
+#include <CoreServices/CoreServices.h>
+#endif
+
 #include "templates.h"
 #include "m_alloc.h"
 #include "m_argv.h"
+#include "c_dispatch.h"
 #include "m_swap.h"
 #include "g_game.h"
 #include "i_system.h"
@@ -60,63 +76,55 @@
 #include "version.h"
 #include "md5.h"
 
-node_t * gamenodes;
-int numgamenodes;
-subsector_t * gamesubsectors;
-int numgamesubsectors;
 void P_GetPolySpots (MapData * lump, TArray<FNodeBuilder::FPolyStart> &spots, TArray<FNodeBuilder::FPolyStart> &anchors);
-
-extern bool	UsingGLNodes;
 
 CVAR(Bool, gl_cachenodes, true, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 CVAR(Float, gl_cachetime, 0.6f, CVAR_ARCHIVE|CVAR_GLOBALCONFIG)
 
 void P_LoadZNodes (FileReader &dalump, DWORD id);
-bool CheckCachedNodes(MapData *map);
-void CreateCachedNodes(MapData *map);
+static bool CheckCachedNodes(MapData *map);
+static void CreateCachedNodes(MapData *map);
 
 
 // fixed 32 bit gl_vert format v2.0+ (glBsp 1.91)
-typedef struct
+struct mapglvertex_t
 {
   fixed_t x,y;
-} mapglvertex_t;
+};
 
-typedef struct 
+struct gl3_mapsubsector_t
 {
 	SDWORD numsegs;
 	SDWORD firstseg;    // Index of first one; segs are stored sequentially.
-} gl3_mapsubsector_t;
+};
 
-typedef struct
+struct glseg_t
 {
-	unsigned short	v1;		 // start vertex		(16 bit)
-	unsigned short	v2;		 // end vertex			(16 bit)
-	unsigned short	linedef; // linedef, or -1 for minisegs
-	short			side;	 // side on linedef: 0 for right, 1 for left
-	unsigned short	partner; // corresponding partner seg, or -1 on one-sided walls
-} glseg_t;
+	WORD	v1;		 // start vertex		(16 bit)
+	WORD	v2;		 // end vertex			(16 bit)
+	WORD	linedef; // linedef, or -1 for minisegs
+	WORD	side;	 // side on linedef: 0 for right, 1 for left
+	WORD	partner; // corresponding partner seg, or 0xffff on one-sided walls
+};
 
-typedef struct
+struct glseg3_t
 {
 	SDWORD			v1;
 	SDWORD			v2;
-	unsigned short	linedef;
-	short			side;
+	WORD			linedef;
+	WORD			side;
 	SDWORD			partner;
-} glseg3_t;
+};
 
-
-typedef struct
+struct gl5_mapnode_t
 {
-	short 	x,y,dx,dy;	// partition line
-	short 	bbox[2][4];	// bounding box for each child
+	SWORD 	x,y,dx,dy;	// partition line
+	SWORD 	bbox[2][4];	// bounding box for each child
 	// If NF_SUBSECTOR is or'ed in, it's a subsector,
 	// else it's a node of another subtree.
-	unsigned int children[2];
-} gl5_mapnode_t;
+	DWORD children[2];
+};
 
-#define GL5_NF_SUBSECTOR (1 << 31)
 
 
 //==========================================================================
@@ -127,7 +135,7 @@ typedef struct
 //
 //==========================================================================
 
-int gl_CheckForMissingSegs()
+static int CheckForMissingSegs()
 {
 	float *added_seglen = new float[numsides];
 	int missing = 0;
@@ -166,15 +174,15 @@ int gl_CheckForMissingSegs()
 //
 //==========================================================================
 
-bool gl_CheckForGLNodes()
+bool P_CheckForGLNodes()
 {
 	int i;
 
 	for(i=0;i<numsubsectors;i++)
 	{
 		subsector_t * sub = &subsectors[i];
-		seg_t * firstseg = &segs[sub->firstline];
-		seg_t * lastseg = &segs[sub->firstline+sub->numlines-1];
+		seg_t * firstseg = sub->firstline;
+		seg_t * lastseg = sub->firstline + sub->numlines - 1;
 
 		if (firstseg->v1 != lastseg->v2)
 		{
@@ -197,7 +205,7 @@ bool gl_CheckForGLNodes()
 	// all subsectors were closed but there are no minisegs
 	// Although unlikely this can happen. Such nodes are not a problem.
 	// all that is left is to check whether the BSP covers all sidedefs completely.
-	int missing = gl_CheckForMissingSegs();
+	int missing = CheckForMissingSegs();
 	if (missing > 0)
 	{
 		Printf("%d missing segs counted\nThe BSP needs to be rebuilt", missing);
@@ -208,7 +216,7 @@ bool gl_CheckForGLNodes()
 
 //==========================================================================
 //
-// gl_LoadVertexes
+// LoadGLVertexes
 //
 // loads GL vertices
 //
@@ -222,7 +230,7 @@ bool gl_CheckForGLNodes()
 static int firstglvertex;
 static bool format5;
 
-static bool gl_LoadVertexes(FileReader * f, wadlump_t * lump)
+static bool LoadGLVertexes(FileReader * f, wadlump_t * lump)
 {
 	BYTE *gldata;
 	int                 i;
@@ -272,7 +280,7 @@ static bool gl_LoadVertexes(FileReader * f, wadlump_t * lump)
 		vertexes[i].y = LittleLong(mgl->y);
 		mgl++;
 	}
-	delete gldata;
+	delete[] gldata;
 	return true;
 }
 
@@ -298,11 +306,11 @@ static inline int checkGLVertex3(int num)
 
 //==========================================================================
 //
-// gl_LoadGLSegs
+// LoadGLSegs
 //
 //==========================================================================
 
-bool gl_LoadGLSegs(FileReader * f, wadlump_t * lump)
+static bool LoadGLSegs(FileReader * f, wadlump_t * lump)
 {
 	char		*data;
 	int			i;
@@ -323,6 +331,7 @@ bool gl_LoadGLSegs(FileReader * f, wadlump_t * lump)
 			numsegs/=sizeof(glseg_t);
 			segs = new seg_t[numsegs];
 			memset(segs,0,sizeof(seg_t)*numsegs);
+			glsegextras = new glsegextra_t[numsegs];
 			
 			glseg_t * ml = (glseg_t*)data;
 			for(i = 0; i < numsegs; i++)
@@ -330,7 +339,7 @@ bool gl_LoadGLSegs(FileReader * f, wadlump_t * lump)
 				segs[i].v1 = &vertexes[checkGLVertex(LittleShort(ml->v1))];
 				segs[i].v2 = &vertexes[checkGLVertex(LittleShort(ml->v2))];
 				
-				segs[i].PartnerSeg=&segs[LittleShort(ml->partner)];
+				glsegextras[i].PartnerSeg = ml->partner == 0xFFFF ? DWORD_MAX : LittleShort(ml->partner);
 				if(ml->linedef != 0xffff)
 				{
 					ldef = &lines[LittleShort(ml->linedef)];
@@ -368,6 +377,7 @@ bool gl_LoadGLSegs(FileReader * f, wadlump_t * lump)
 			numsegs/=sizeof(glseg3_t);
 			segs = new seg_t[numsegs];
 			memset(segs,0,sizeof(seg_t)*numsegs);
+			glsegextras = new glsegextra_t[numsegs];
 			
 			glseg3_t * ml = (glseg3_t*)(data+ (format5? 0:4));
 			for(i = 0; i < numsegs; i++)
@@ -375,7 +385,7 @@ bool gl_LoadGLSegs(FileReader * f, wadlump_t * lump)
 				segs[i].v1 = &vertexes[checkGLVertex3(LittleLong(ml->v1))];
 				segs[i].v2 = &vertexes[checkGLVertex3(LittleLong(ml->v2))];
 				
-				segs[i].PartnerSeg=&segs[LittleLong(ml->partner)];
+				glsegextras[i].PartnerSeg = LittleLong(ml->partner);
 	
 				if(ml->linedef != 0xffff) // skip minisegs 
 				{
@@ -428,11 +438,11 @@ bool gl_LoadGLSegs(FileReader * f, wadlump_t * lump)
 
 //==========================================================================
 //
-// gl_LoadGLSubsectors
+// LoadGLSubsectors
 //
 //==========================================================================
 
-bool gl_LoadGLSubsectors(FileReader * f, wadlump_t * lump)
+static bool LoadGLSubsectors(FileReader * f, wadlump_t * lump)
 {
 	char * datab;
 	int  i;
@@ -458,7 +468,7 @@ bool gl_LoadGLSubsectors(FileReader * f, wadlump_t * lump)
 		for (i=0; i<numsubsectors; i++)
 		{
 			subsectors[i].numlines  = LittleShort(data[i].numsegs );
-			subsectors[i].firstline = LittleShort(data[i].firstseg);
+			subsectors[i].firstline = segs + LittleShort(data[i].firstseg);
 
 			if (subsectors[i].numlines == 0)
 			{
@@ -477,7 +487,7 @@ bool gl_LoadGLSubsectors(FileReader * f, wadlump_t * lump)
 		for (i=0; i<numsubsectors; i++)
 		{
 			subsectors[i].numlines  = LittleLong(data[i].numsegs );
-			subsectors[i].firstline = LittleLong(data[i].firstseg);
+			subsectors[i].firstline = segs + LittleLong(data[i].firstseg);
 
 			if (subsectors[i].numlines == 0)
 			{
@@ -491,11 +501,11 @@ bool gl_LoadGLSubsectors(FileReader * f, wadlump_t * lump)
 	{
 		for(unsigned j=0;j<subsectors[i].numlines;j++)
 		{
-			seg_t * seg = &segs[subsectors[i].firstline+j];
-			if (seg->linedef==NULL) seg->frontsector = seg->backsector = segs[subsectors[i].firstline].frontsector;
+			seg_t * seg = subsectors[i].firstline + j;
+			if (seg->linedef==NULL) seg->frontsector = seg->backsector = subsectors[i].firstline->frontsector;
 		}
-		seg_t *firstseg = &segs[subsectors[i].firstline];
-		seg_t *lastseg = &segs[subsectors[i].firstline + subsectors[i].numlines - 1];
+		seg_t *firstseg = subsectors[i].firstline;
+		seg_t *lastseg = subsectors[i].firstline + subsectors[i].numlines - 1;
 		// The subsector must be closed. If it isn't we can't use these nodes and have to do a rebuild.
 		if (lastseg->v2 != firstseg->v1)
 		{
@@ -514,8 +524,11 @@ bool gl_LoadGLSubsectors(FileReader * f, wadlump_t * lump)
 //
 //==========================================================================
 
-static bool gl_LoadNodes (FileReader * f, wadlump_t * lump)
+static bool LoadNodes (FileReader * f, wadlump_t * lump)
 {
+	const int NF_SUBSECTOR = 0x8000;
+	const int GL5_NF_SUBSECTOR = (1 << 31);
+
 	int 		i;
 	int 		j;
 	int 		k;
@@ -651,19 +664,19 @@ static bool gl_LoadNodes (FileReader * f, wadlump_t * lump)
 //
 //==========================================================================
 
-bool gl_DoLoadGLNodes(FileReader * f, wadlump_t * lumps)
+static bool DoLoadGLNodes(FileReader * f, wadlump_t * lumps)
 {
-	if (!gl_LoadVertexes(f, &lumps[0]))
+	if (!LoadGLVertexes(f, &lumps[0]))
 	{
 		return false;
 	}
-	if (!gl_LoadGLSegs(f, &lumps[1]))
+	if (!LoadGLSegs(f, &lumps[1]))
 	{
 		delete [] segs;
 		segs = NULL;
 		return false;
 	}
-	if (!gl_LoadGLSubsectors(f, &lumps[2]))
+	if (!LoadGLSubsectors(f, &lumps[2]))
 	{
 		delete [] subsectors;
 		subsectors = NULL;
@@ -671,7 +684,7 @@ bool gl_DoLoadGLNodes(FileReader * f, wadlump_t * lumps)
 		segs = NULL;
 		return false;
 	}
-	if (!gl_LoadNodes(f, &lumps[3]))
+	if (!LoadNodes(f, &lumps[3]))
 	{
 		delete [] nodes;
 		nodes = NULL;
@@ -687,7 +700,7 @@ bool gl_DoLoadGLNodes(FileReader * f, wadlump_t * lumps)
 
 	for (int i = 0; i < numsubsectors; i++)
 	{
-		seg_t * seg = &segs[subsectors[i].firstline];
+		seg_t * seg = subsectors[i].firstline;
 		if (!seg->sidedef) 
 		{
 			Printf("GL nodes contain invalid data. The BSP has to be rebuilt.\n");
@@ -702,7 +715,7 @@ bool gl_DoLoadGLNodes(FileReader * f, wadlump_t * lumps)
 	}
 
 	// check whether the BSP covers all sidedefs completely.
-	int missing = gl_CheckForMissingSegs();
+	int missing = CheckForMissingSegs();
 	if (missing > 0)
 	{
 		Printf("%d missing segs counted in GL nodes.\nThe BSP has to be rebuilt", missing);
@@ -832,11 +845,54 @@ static int FindGLNodesInFile(FileReader * f, const char * label)
 //==========================================================================
 //
 // Checks for the presence of GL nodes in the loaded WADs or a .GWA file
+// returns true if successful
 //
 //==========================================================================
 
-bool gl_LoadGLNodes(MapData * map)
+bool P_LoadGLNodes(MapData * map)
 {
+
+	if (map->MapLumps[ML_GLZNODES].Size != 0)
+	{
+		const int idcheck = MAKE_ID('Z','G','L','N');
+		const int idcheck2 = MAKE_ID('Z','G','L','2');
+		const int idcheck3 = MAKE_ID('X','G','L','N');
+		const int idcheck4 = MAKE_ID('X','G','L','2');
+		int id;
+
+		map->Seek(ML_GLZNODES);
+		map->file->Read (&id, 4);
+		if (id == idcheck || id == idcheck2 || id == idcheck3 || id == idcheck4)
+		{
+			try
+			{
+				subsectors = NULL;
+				segs = NULL;
+				nodes = NULL;
+				P_LoadZNodes (*map->file, id);
+				return true;
+			}
+			catch (CRecoverableError &)
+			{
+				if (subsectors != NULL)
+				{
+					delete[] subsectors;
+					subsectors = NULL;
+				}
+				if (segs != NULL)
+				{
+					delete[] segs;
+					segs = NULL;
+				}
+				if (nodes != NULL)
+				{
+					delete[] nodes;
+					nodes = NULL;
+				}
+			}
+		}
+	}
+
 	if (!CheckCachedNodes(map))
 	{
 		wadlump_t gwalumps[4];
@@ -861,7 +917,7 @@ bool gl_LoadGLNodes(MapData * map)
 					gwalumps[i].FilePos=Wads.GetLumpOffset(li+i+1);
 					gwalumps[i].Size=Wads.LumpLength(li+i+1);
 				}
-				return gl_DoLoadGLNodes(fr, gwalumps);
+				return DoLoadGLNodes(fr, gwalumps);
 			}
 			else
 			{
@@ -900,7 +956,7 @@ bool gl_LoadGLNodes(MapData * map)
 					break;
 				}
 			}
-			if (result) result = gl_DoLoadGLNodes(fr, gwalumps);
+			if (result) result = DoLoadGLNodes(fr, gwalumps);
 		}
 
 		if (f_gwa)
@@ -919,30 +975,17 @@ bool gl_LoadGLNodes(MapData * map)
 //
 //==========================================================================
 
-void gl_CheckNodes(MapData * map, bool rebuilt, int buildtime)
+bool P_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 {
-	// Save the old nodes so that R_PointInSubsector can use them
-	// Unfortunately there are some screwed up WADs which can not
-	// be reliably processed by the internal node builder
-	// It is not necessary to keep the segs (and vertices) because they aren't used there.
-	if (nodes && subsectors)
-	{
-		gamenodes = nodes;
-		numgamenodes = numnodes;
-		gamesubsectors = subsectors;
-		numgamesubsectors = numsubsectors;
-	}
-	else
-	{
-		gamenodes=NULL;
-	}
+	bool ret = false;
 
 	// If the map loading code has performed a node rebuild we don't need to check for it again.
-	if (!rebuilt && !gl_CheckForGLNodes())
+	if (!rebuilt && !P_CheckForGLNodes())
 	{
+		ret = true;	// we are not using the level's original nodes if we get here.
 		for (int i = 0; i < numsubsectors; i++)
 		{
-			gamesubsectors[i].sector = segs[gamesubsectors[i].firstline].sidedef->sector;
+			gamesubsectors[i].sector = gamesubsectors[i].firstline->sidedef->sector;
 		}
 
 		nodes = NULL;
@@ -954,7 +997,7 @@ void gl_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 		numsegs = 0;
 
 		// Try to load GL nodes (cached or GWA)
-		if (!gl_LoadGLNodes(map))
+		if (!P_LoadGLNodes(map))
 		{
 			// none found - we have to build new ones!
 			unsigned int startTime, endTime;
@@ -969,11 +1012,10 @@ void gl_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 				lines, numlines
 			};
 			leveldata.FindMapBounds ();
-			FNodeBuilder builder (leveldata, polyspots, anchors, true, CPU.bSSE2);
-			UsingGLNodes = true;
+			FNodeBuilder builder (leveldata, polyspots, anchors, true);
 			delete[] vertexes;
 			builder.Extract (nodes, numnodes,
-				segs, numsegs,
+				segs, glsegextras, numsegs,
 				subsectors, numsubsectors,
 				vertexes, numvertexes);
 			endTime = I_FPSTime ();
@@ -983,7 +1025,7 @@ void gl_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 	}
 
 #ifdef DEBUG
-	// Building nodes in debug is much slower so let's cache them only if gl_cachenides is on
+	// Building nodes in debug is much slower so let's cache them only if cachetime is 0
 	buildtime = 0;
 #endif
 	if (gl_cachenodes && buildtime/1000.f >= gl_cachetime)
@@ -1004,6 +1046,7 @@ void gl_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 		gamesubsectors = subsectors;
 		numgamesubsectors = numsubsectors;
 	}
+	return ret;
 }
 
 //==========================================================================
@@ -1014,19 +1057,45 @@ void gl_CheckNodes(MapData * map, bool rebuilt, int buildtime)
 
 typedef TArray<BYTE> MemFile;
 
-
-FString CreateCacheName(MapData *map, bool create)
+static FString GetCachePath()
 {
 	FString path;
 
-	#ifndef unix
-		path = ExpandEnvVars("$LOCALAPPDATA");
-		if (path.Len() != 0) path += '/';
-		path += "gzdoom/cache";
-	#else
-		path = HOME_DIR"/cache";
-	#endif
-	
+#ifdef _WIN32
+	char pathstr[MAX_PATH];
+	if (0 != SHGetFolderPathA(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, pathstr))
+	{ // Failed (e.g. On Win9x): use program directory
+		path = progdir;
+	}
+	else
+	{
+		path = pathstr;
+	}
+	path += "/zdoom/cache";
+#elif defined(__APPLE__)
+	char pathstr[PATH_MAX];
+	FSRef folder;
+
+	if (noErr == FSFindFolder(kLocalDomain, kApplicationSupportFolderType, kCreateFolder, &folder) &&
+		noErr == FSRefMakePath(&folder, (UInt8*)path.GetChars(), PATH_MAX))
+	{
+		path = pathstr;
+	}
+	else
+	{
+		path = progdir;
+	}
+	path += "/zdoom/cache";
+#else
+	// Don't use GAME_DIR and such so that ZDoom and its child ports can share the node cache.
+	path = NicePath("~/.zdoom/cache");
+#endif
+	return path;
+}
+
+static FString CreateCacheName(MapData *map, bool create)
+{
+	FString path = GetCachePath();
 	FString lumpname = Wads.GetLumpFullPath(map->lumpnum);
 	int separator = lumpname.IndexOf(':');
 	path << '/' << lumpname.Left(separator);
@@ -1037,19 +1106,19 @@ FString CreateCacheName(MapData *map, bool create)
 	return path;
 }
 
-void WriteByte(MemFile &f, BYTE b)
+static void WriteByte(MemFile &f, BYTE b)
 {
 	f.Push(b);
 }
 
-void WriteWord(MemFile &f, WORD b)
+static void WriteWord(MemFile &f, WORD b)
 {
 	int v = f.Reserve(2);
 	f[v] = (BYTE)b;
 	f[v+1] = (BYTE)(b>>8);
 }
 
-void WriteLong(MemFile &f, DWORD b)
+static void WriteLong(MemFile &f, DWORD b)
 {
 	int v = f.Reserve(4);
 	f[v] = (BYTE)b;
@@ -1058,7 +1127,7 @@ void WriteLong(MemFile &f, DWORD b)
 	f[v+3] = (BYTE)(b>>24);
 }
 
-void CreateCachedNodes(MapData *map)
+static void CreateCachedNodes(MapData *map)
 {
 	MemFile ZNodes;
 
@@ -1080,7 +1149,7 @@ void CreateCachedNodes(MapData *map)
 	for(int i=0;i<numsegs;i++)
 	{
 		WriteLong(ZNodes, DWORD(segs[i].v1 - vertexes));
-		WriteLong(ZNodes, DWORD(segs[i].PartnerSeg - segs));
+		WriteLong(ZNodes, DWORD(glsegextras[i].PartnerSeg));
 		if (segs[i].linedef)
 		{
 			WriteLong(ZNodes, DWORD(segs[i].linedef - lines));
@@ -1157,7 +1226,7 @@ void CreateCachedNodes(MapData *map)
 }
 
 
-bool CheckCachedNodes(MapData *map)
+static bool CheckCachedNodes(MapData *map)
 {
 	char magic[4] = {0,0,0,0};
 	BYTE md5[16];
@@ -1174,7 +1243,7 @@ bool CheckCachedNodes(MapData *map)
 
 	if (fread(&numlin, 4, 1, f) != 1) goto errorout; 
 	numlin = LittleLong(numlin);
-	if (numlin != numlines) goto errorout;
+	if ((int)numlin != numlines) goto errorout;
 
 	if (fread(md5, 1, 16, f) != 16) goto errorout;
 	map->GetChecksum(md5map);
@@ -1231,16 +1300,49 @@ errorout:
 	return false;
 }
 
+CCMD(clearnodecache)
+{
+	TArray<FFileList> list;
+	FString path = GetCachePath();
+	path += "/";
+
+	try
+	{
+		ScanDirectory(list, path);
+	}
+	catch (CRecoverableError &err)
+	{
+		Printf("%s", err.GetMessage());
+		return;
+	}
+
+	// Scan list backwards so that when we reach a directory
+	// all files within are already deleted.
+	for(int i = list.Size()-1; i >= 0; i--)
+	{
+		if (list[i].isDirectory)
+		{
+			rmdir(list[i].Filename);
+		}
+		else
+		{
+			remove(list[i].Filename);
+		}
+	}
+
+		
+}
+
 //==========================================================================
 //
-// I am keeping both the original nodes from the WAD and the ones
-// created for the GL renderer. THe original set is only being used
-// to get the sector for in-game positioning of actors but not for rendering.
+// Keep both the original nodes from the WAD and the GL nodes created here.
+// The original set is only being used to get the sector for in-game 
+// positioning of actors but not for rendering.
 //
-// Unfortunately this is necessary because ZDBSP is much more sensitive
+// This is necessary because ZDBSP is much more sensitive
 // to sloppy mapping practices that produce overlapping sectors.
-// The crane in P:AR E1M3 is a good example that would be broken If
-// I didn't do this.
+// The crane in P:AR E1M3 is a good example that would be broken if
+// this wasn't done.
 //
 //==========================================================================
 
@@ -1273,4 +1375,221 @@ subsector_t *P_PointInSubsector (fixed_t x, fixed_t y)
 }
 
 
+//==========================================================================
+//
+// PointOnLine
+//
+// Same as the one im the node builder, but not part of a specific class
+//
+//==========================================================================
 
+static bool PointOnLine (int x, int y, int x1, int y1, int dx, int dy)
+{
+	const double SIDE_EPSILON = 6.5536;
+
+	// For most cases, a simple dot product is enough.
+	double d_dx = double(dx);
+	double d_dy = double(dy);
+	double d_x = double(x);
+	double d_y = double(y);
+	double d_x1 = double(x1);
+	double d_y1 = double(y1);
+
+	double s_num = (d_y1-d_y)*d_dx - (d_x1-d_x)*d_dy;
+
+	if (fabs(s_num) < 17179869184.0)	// 4<<32
+	{
+		// Either the point is very near the line, or the segment defining
+		// the line is very short: Do a more expensive test to determine
+		// just how far from the line the point is.
+		double l = sqrt(d_dx*d_dx+d_dy*d_dy);
+		double dist = fabs(s_num)/l;
+		if (dist < SIDE_EPSILON)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+
+//==========================================================================
+//
+// SetRenderSector
+//
+// Sets the render sector for each GL subsector so that the proper flat 
+// information can be retrieved
+//
+//==========================================================================
+
+void P_SetRenderSector()
+{
+	int 				i;
+	DWORD 				j;
+	TArray<subsector_t *> undetermined;
+	subsector_t *		ss;
+
+#if 0	// doesn't work as expected :(
+
+	// hide all sectors on textured automap that only have hidden lines.
+	bool *hidesec = new bool[numsectors];
+	for(i = 0; i < numsectors; i++)
+	{
+		hidesec[i] = true;
+	}
+	for(i = 0; i < numlines; i++)
+	{
+		if (!(lines[i].flags & ML_DONTDRAW))
+		{
+			hidesec[lines[i].frontsector - sectors] = false;
+			if (lines[i].backsector != NULL)
+			{
+				hidesec[lines[i].backsector - sectors] = false;
+			}
+		}
+	}
+	for(i = 0; i < numsectors; i++)
+	{
+		if (hidesec[i]) sectors[i].MoreFlags |= SECF_HIDDEN;
+	}
+	delete [] hidesec;
+#endif
+
+	// Check for incorrect partner seg info so that the following code does not crash.
+	if (glsegextras == NULL)
+	{
+		// This can be normal nodes, mistakenly identified as GL nodes so we must fill
+		// in the missing pieces differently.
+
+		for (i = 0; i < numsubsectors; i++)
+		{
+			ss = &subsectors[i];
+			ss->render_sector = ss->sector;
+		}
+		return;
+	}
+
+	for(i=0;i<numsegs;i++)
+	{
+		int partner = (int)glsegextras[i].PartnerSeg;
+
+		if (partner<0 || partner>=numsegs/*eh? || &segs[partner]!=glsegextras[i].PartnerSeg*/)
+		{
+			glsegextras[i].PartnerSeg=DWORD_MAX;
+		}
+
+		// glbsp creates such incorrect references for Strife.
+		if (segs[i].linedef && glsegextras[i].PartnerSeg != DWORD_MAX && !segs[glsegextras[i].PartnerSeg].linedef)
+		{
+			glsegextras[i].PartnerSeg = glsegextras[glsegextras[i].PartnerSeg].PartnerSeg = DWORD_MAX;
+		}
+	}
+
+	for(i=0;i<numsegs;i++)
+	{
+		if (glsegextras[i].PartnerSeg != DWORD_MAX && glsegextras[glsegextras[i].PartnerSeg].PartnerSeg!=(DWORD)i)
+		{
+			glsegextras[i].PartnerSeg=DWORD_MAX;
+		}
+	}
+
+	// look up sector number for each subsector
+	for (i = 0; i < numsubsectors; i++)
+	{
+		// For rendering pick the sector from the first seg that is a sector boundary
+		// this takes care of self-referencing sectors
+		ss = &subsectors[i];
+		seg_t *seg = ss->firstline;
+
+		// Check for one-dimensional subsectors. These should be ignored when
+		// being processed for automap drawinng etc.
+		ss->flags |= SSECF_DEGENERATE;
+		for(j=2; j<ss->numlines; j++)
+		{
+			if (!PointOnLine(seg[j].v1->x, seg[j].v1->y, seg->v1->x, seg->v1->y, seg->v2->x-seg->v1->x, seg->v2->y-seg->v1->y))
+			{
+				// Not on the same line
+				ss->flags &= ~SSECF_DEGENERATE;
+				break;
+			}
+		}
+
+		seg = ss->firstline;
+		for(j=0; j<ss->numlines; j++)
+		{
+			if(seg->sidedef && (glsegextras[seg - segs].PartnerSeg == DWORD_MAX || seg->sidedef->sector!=segs[glsegextras[seg - segs].PartnerSeg].sidedef->sector))
+			{
+				ss->render_sector = seg->sidedef->sector;
+				break;
+			}
+			seg++;
+		}
+		if(ss->render_sector == NULL) 
+		{
+			undetermined.Push(ss);
+		}
+	}
+
+	// assign a vaild render sector to all subsectors which haven't been processed yet.
+	while (undetermined.Size())
+	{
+		bool deleted=false;
+		for(i=undetermined.Size()-1;i>=0;i--)
+		{
+			ss=undetermined[i];
+			seg_t * seg = ss->firstline;
+			
+			for(j=0; j<ss->numlines; j++)
+			{
+				DWORD partner = glsegextras[seg - segs].PartnerSeg;
+				if (partner != DWORD_MAX && glsegextras[partner].Subsector)
+				{
+					sector_t * backsec = glsegextras[partner].Subsector->render_sector;
+					if (backsec)
+					{
+						ss->render_sector=backsec;
+						undetermined.Delete(i);
+						deleted=1;
+						break;
+					}
+				}
+				seg++;
+			}
+		}
+		// We still got some left but the loop above was unable to assign them.
+		// This only happens when a subsector is off the map.
+		// Don't bother and just assign the real sector for rendering
+		if (!deleted && undetermined.Size()) 
+		{
+			for(i=undetermined.Size()-1;i>=0;i--)
+			{
+				ss=undetermined[i];
+				ss->render_sector=ss->sector;
+			}
+			break;
+		}
+	}
+
+#if 0	// may be useful later so let's keep it here for now
+	// now group the subsectors by sector
+	subsector_t ** subsectorbuffer = new subsector_t * [numsubsectors];
+
+	for(i=0, ss=subsectors; i<numsubsectors; i++, ss++)
+	{
+		ss->render_sector->subsectorcount++;
+	}
+
+	for (i=0; i<numsectors; i++) 
+	{
+		sectors[i].subsectors = subsectorbuffer;
+		subsectorbuffer += sectors[i].subsectorcount;
+		sectors[i].subsectorcount = 0;
+	}
+	
+	for(i=0, ss = subsectors; i<numsubsectors; i++, ss++)
+	{
+		ss->render_sector->subsectors[ss->render_sector->subsectorcount++]=ss;
+	}
+#endif
+
+}

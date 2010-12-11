@@ -38,7 +38,6 @@
 #include "g_level.h"
 #include "sc_man.h"
 #include "w_wad.h"
-#include "m_menu.h"
 #include "cmdlib.h"
 #include "v_video.h"
 #include "p_lnspec.h"
@@ -51,6 +50,8 @@
 #include "doomstat.h"
 #include "d_player.h"
 #include "autosegs.h"
+#include "version.h"
+#include "v_text.h"
 
 int FindEndSequence (int type, const char *picname);
 
@@ -60,6 +61,8 @@ TArray<level_info_t> wadlevelinfos;
 
 level_info_t TheDefaultLevelInfo;
 static cluster_info_t TheDefaultClusterInfo;
+
+TArray<FEpisode> AllEpisodes;
 
 //==========================================================================
 //
@@ -265,6 +268,7 @@ void level_info_t::Reset()
 	bordertexture[0] = 0;
 	teamdamage = 0.f;
 	specialactions.Clear();
+	DefaultEnvironment = 0;
 }
 
 
@@ -1250,6 +1254,36 @@ DEFINE_MAP_OPTION(mapbackground, true)
 	parse.ParseLumpOrTextureName(info->mapbg);
 }
 
+DEFINE_MAP_OPTION(defaultenvironment, false)
+{
+	int id;
+
+	parse.ParseAssign();
+	if (parse.sc.CheckNumber())
+	{ // Numeric ID XXX [, YYY]
+		id = parse.sc.Number << 8;
+		if (parse.CheckNumber())
+		{
+			id |= parse.sc.Number;
+		}
+	}
+	else
+	{ // Named environment
+		parse.sc.MustGetString();
+		ReverbContainer *reverb = S_FindEnvironment(parse.sc.String);
+		if (reverb == NULL)
+		{
+			parse.sc.ScriptMessage("Unknown sound environment '%s'\n", parse.sc.String);
+			id = 0;
+		}
+		else
+		{
+			id = reverb->ID;
+		}
+	}
+	info->DefaultEnvironment = id;
+}
+
 
 //==========================================================================
 //
@@ -1293,6 +1327,7 @@ MapFlagHandlers[] =
 	{ "specialaction_exitlevel",		MITYPE_SCFLAGS,	0, ~LEVEL_SPECACTIONSMASK },
 	{ "specialaction_opendoor",			MITYPE_SCFLAGS,	LEVEL_SPECOPENDOOR, ~LEVEL_SPECACTIONSMASK },
 	{ "specialaction_lowerfloor",		MITYPE_SCFLAGS,	LEVEL_SPECLOWERFLOOR, ~LEVEL_SPECACTIONSMASK },
+	{ "specialaction_lowerfloortohighest",MITYPE_SCFLAGS,LEVEL_SPECLOWERFLOORTOHIGHEST, ~LEVEL_SPECACTIONSMASK },
 	{ "specialaction_killmonsters",		MITYPE_SETFLAG,	LEVEL_SPECKILLMONSTERS, 0 },
 	{ "lightning",						MITYPE_SETFLAG,	LEVEL_STARTLIGHTNING, 0 },
 	{ "smoothlighting",					MITYPE_SETFLAG2,	LEVEL2_SMOOTHLIGHTING, 0 },
@@ -1341,6 +1376,9 @@ MapFlagHandlers[] =
 	{ "grinding_polyobj",				MITYPE_SETFLAG2,	LEVEL2_POLYGRIND, 0 },
 	{ "no_grinding_polyobj",			MITYPE_CLRFLAG2,	LEVEL2_POLYGRIND, 0 },
 	{ "resetinventory",					MITYPE_SETFLAG2,	LEVEL2_RESETINVENTORY, 0 },
+	{ "resethealth",					MITYPE_SETFLAG2,	LEVEL2_RESETHEALTH, 0 },
+	{ "endofgame",						MITYPE_SETFLAG2,	LEVEL2_ENDGAME, 0 },
+	{ "nostatistics",					MITYPE_SETFLAG2,	LEVEL2_NOSTATISTICS, 0 },
 	{ "unfreezesingleplayerconversations",MITYPE_SETFLAG2,	LEVEL2_CONV_SINGLE_UNFREEZE, 0 },
 	{ "nobotnodes",						MITYPE_IGNORE,	0, 0 },		// Skulltag option: nobotnodes
 	{ "compat_shorttex",				MITYPE_COMPATFLAG, COMPATF_SHORTTEX},
@@ -1368,6 +1406,8 @@ MapFlagHandlers[] =
 	{ "compat_corpsegibs",				MITYPE_COMPATFLAG, COMPATF_CORPSEGIBS},
 	{ "compat_noblockfriends",			MITYPE_COMPATFLAG, COMPATF_NOBLOCKFRIENDS},
 	{ "compat_spritesort",				MITYPE_COMPATFLAG, COMPATF_SPRITESORT},
+	{ "compat_light",					MITYPE_COMPATFLAG, COMPATF_LIGHT},
+	{ "compat_polyobj",					MITYPE_COMPATFLAG, COMPATF_POLYOBJ},
 	{ "cd_start_track",					MITYPE_EATNEXT,	0, 0 },
 	{ "cd_end1_track",					MITYPE_EATNEXT,	0, 0 },
 	{ "cd_end2_track",					MITYPE_EATNEXT,	0, 0 },
@@ -1618,10 +1658,10 @@ level_info_t *FMapInfoParser::ParseMapHeader(level_info_t &defaultinfo)
 
 void FMapInfoParser::ParseEpisodeInfo ()
 {
-	int i;
+	unsigned int i;
 	char map[9];
-	char *pic = NULL;
-	bool picisgfx = false;	// Shut up, GCC!!!!
+	FString pic;
+	FString name;
 	bool remove = false;
 	char key = 0;
 	bool noskill = false;
@@ -1660,15 +1700,13 @@ void FMapInfoParser::ParseEpisodeInfo ()
 		{
 			ParseAssign();
 			sc.MustGetString ();
-			ReplaceString (&pic, sc.String);
-			picisgfx = false;
+			name = sc.String;
 		}
 		else if (sc.Compare ("picname"))
 		{
 			ParseAssign();
 			sc.MustGetString ();
-			ReplaceString (&pic, sc.String);
-			picisgfx = true;
+			pic = sc.String;
 		}
 		else if (sc.Compare ("remove"))
 		{
@@ -1714,9 +1752,9 @@ void FMapInfoParser::ParseEpisodeInfo ()
 	}
 
 
-	for (i = 0; i < EpiDef.numitems; ++i)
+	for (i = 0; i < AllEpisodes.Size(); i++)
 	{
-		if (strncmp (EpisodeMaps[i], map, 8) == 0)
+		if (AllEpisodes[i].mEpisodeMap.CompareNoCase(map) == 0)
 		{
 			break;
 		}
@@ -1725,49 +1763,17 @@ void FMapInfoParser::ParseEpisodeInfo ()
 	if (remove)
 	{
 		// If the remove property is given for an episode, remove it.
-		if (i < EpiDef.numitems)
-		{
-			if (i+1 < EpiDef.numitems)
-			{
-				memmove (&EpisodeMaps[i], &EpisodeMaps[i+1],
-					sizeof(EpisodeMaps[0])*(EpiDef.numitems - i - 1));
-				memmove (&EpisodeMenu[i], &EpisodeMenu[i+1],
-					sizeof(EpisodeMenu[0])*(EpiDef.numitems - i - 1));
-				memmove (&EpisodeNoSkill[i], &EpisodeNoSkill[i+1], 
-					sizeof(EpisodeNoSkill[0])*(EpiDef.numitems - i - 1));
-			}
-			EpiDef.numitems--;
-		}
+		AllEpisodes.Delete(i);
 	}
 	else
 	{
-		if (pic == NULL)
-		{
-			pic = copystring (map);
-			picisgfx = false;
-		}
+		FEpisode *epi = &AllEpisodes[AllEpisodes.Reserve(1)];
 
-		if (i == EpiDef.numitems)
-		{
-			if (EpiDef.numitems == MAX_EPISODES)
-			{
-				i = EpiDef.numitems - 1;
-			}
-			else
-			{
-				i = EpiDef.numitems++;
-			}
-		}
-		else
-		{
-			delete[] const_cast<char *>(EpisodeMenu[i].name);
-		}
-
-		EpisodeMenu[i].name = pic;
-		EpisodeMenu[i].alphaKey = tolower(key);
-		EpisodeMenu[i].fulltext = !picisgfx;
-		EpisodeNoSkill[i] = noskill;
-		strncpy (EpisodeMaps[i], map, 8);
+		epi->mEpisodeMap = map;
+		epi->mEpisodeName = name;
+		epi->mPicName = pic;
+		epi->mShortcut = tolower(key);
+		epi->mNoSkill = noskill;
 	}
 }
 
@@ -1780,12 +1786,7 @@ void FMapInfoParser::ParseEpisodeInfo ()
 
 void ClearEpisodes()
 {
-	for (int i = 0; i < EpiDef.numitems; ++i)
-	{
-		delete[] const_cast<char *>(EpisodeMenu[i].name);
-		EpisodeMenu[i].name = NULL;
-	}
-	EpiDef.numitems = 0;
+	AllEpisodes.Clear();
 }
 
 //==========================================================================
@@ -1829,6 +1830,15 @@ void FMapInfoParser::ParseMapInfo (int lump, level_info_t &gamedefaults, level_i
 			if (inclump < 0)
 			{
 				sc.ScriptError("include file '%s' not found", sc.String);
+			}
+			if (Wads.GetLumpFile(sc.LumpNum) != Wads.GetLumpFile(inclump))
+			{
+				// Do not allow overriding includes from the default MAPINFO
+				if (Wads.GetLumpFile(sc.LumpNum) == 0)
+				{
+					I_FatalError("File %s is overriding core lump %s.",
+						Wads.GetWadFullName(Wads.GetLumpFile(inclump)), sc.String);
+				}
 			}
 			FScanner saved_sc = sc;
 			ParseMapInfo(inclump, gamedefaults, defaultinfo);
@@ -1921,12 +1931,18 @@ void G_ParseMapInfo (const char *basemapinfo)
 
 	atterm(ClearEpisodes);
 
-	// Parse the default MAPINFO for the current game.
+	// Parse the default MAPINFO for the current game. This lump *MUST* come from zdoom.pk3.
 	if (basemapinfo != NULL)
 	{
 		FMapInfoParser parse;
 		level_info_t defaultinfo;
-		parse.ParseMapInfo(Wads.GetNumForFullName(basemapinfo), gamedefaults, defaultinfo);
+		int baselump = Wads.GetNumForFullName(basemapinfo);
+		if (Wads.GetLumpFile(baselump) > 0)
+		{
+			I_FatalError("File %s is overriding core lump %s.", 
+				Wads.GetWadFullName(Wads.GetLumpFile(baselump)), basemapinfo);
+		}
+		parse.ParseMapInfo(baselump, gamedefaults, defaultinfo);
 	}
 
 	static const char *mapinfonames[] = { "MAPINFO", "ZMAPINFO", NULL };
@@ -1951,7 +1967,7 @@ void G_ParseMapInfo (const char *basemapinfo)
 	}
 	EndSequences.ShrinkToFit ();
 
-	if (EpiDef.numitems == 0)
+	if (AllEpisodes.Size() == 0)
 	{
 		I_FatalError ("You cannot use clearepisodes in a MAPINFO if you do not define any new episodes after it.");
 	}

@@ -256,7 +256,7 @@ bool P_ActivateLine (line_t *line, AActor *mo, int side, int activationType)
 // end of changed code
 	if (developer && buttonSuccess)
 	{
-		Printf ("Line special %d activated\n", special);
+		Printf ("Line special %d activated on line %i\n", special, int(line - lines));
 	}
 	return true;
 }
@@ -294,7 +294,7 @@ bool P_TestActivateLine (line_t *line, AActor *mo, int side, int activationType)
 	{
 		lineActivation |= SPAC_Cross|SPAC_MCross;
 	}
-	if (activationType == SPAC_Use)
+	if (activationType ==SPAC_Use || activationType == SPAC_UseBack)
 	{
 		if (!P_CheckSwitchRange(mo, line, side))
 		{
@@ -452,6 +452,11 @@ void P_PlayerInSpecialSector (player_t *player, sector_t * sector)
 				P_DamageMobj (player->mo, NULL, NULL, 5, NAME_Slime);
 			break;
 
+		case hDamage_Sludge:
+			if (ironfeet == NULL && !(level.time&0x1f))
+				P_DamageMobj (player->mo, NULL, NULL, 4, NAME_Slime);
+			break;
+
 		case dDamage_SuperHellslime:
 			// SUPER HELLSLIME DAMAGE
 		case dLight_Strobe_Hurt:
@@ -556,15 +561,33 @@ void P_PlayerInSpecialSector (player_t *player, sector_t * sector)
 
 	if (sector->special & SECRET_MASK)
 	{
-		player->secretcount++;
-		level.found_secrets++;
 		sector->special &= ~SECRET_MASK;
-		if (player->mo->CheckLocalView (consoleplayer))
+		P_GiveSecret(player->mo, true, true);
+	}
+}
+
+
+//============================================================================
+//
+// P_GiveSecret
+//
+//============================================================================
+
+void P_GiveSecret(AActor *actor, bool printmessage, bool playsound)
+{
+	if (actor != NULL)
+	{
+		if (actor->player != NULL)
 		{
-			C_MidPrint (SmallFont, secretmessage);
-			S_Sound (CHAN_AUTO, "misc/secret", 1, ATTN_NORM);
+			actor->player->secretcount++;
+		}
+		if (actor->CheckLocalView (consoleplayer))
+		{
+			if (printmessage) C_MidPrint (SmallFont, secretmessage);
+			if (playsound) S_Sound (CHAN_AUTO, "misc/secret", 1, ATTN_NORM);
 		}
 	}
+	level.found_secrets++;
 }
 
 //============================================================================
@@ -1099,6 +1122,11 @@ void P_SpawnSpecials (void)
 				0, -1, int(sector-sectors), 0);
 			break;
 
+		case Sector_Hidden:
+			sector->MoreFlags |= SECF_HIDDEN;
+			sector->special &= 0xff00;
+			break;
+
 		default:
 			if ((sector->special & 0xff) >= Scroll_North_Slow &&
 				(sector->special & 0xff) <= Scroll_SouthWest_Fast)
@@ -1501,6 +1529,20 @@ static void P_SpawnScrollers(void)
 {
 	int i;
 	line_t *l = lines;
+	TArray<int> copyscrollers;
+
+	for (i = 0; i < numlines; i++)
+	{
+		if (lines[i].special == Sector_CopyScroller)
+		{
+			// don't allow copying the scroller if the sector has the same tag as it would just duplicate it.
+			if (lines[i].args[0] != lines[i].frontsector->tag)
+			{
+				copyscrollers.Push(i);
+			}
+			lines[i].special = 0;
+		}
+	}
 
 	for (i = 0; i < numlines; i++, l++)
 	{
@@ -1571,20 +1613,53 @@ static void P_SpawnScrollers(void)
 
 		case Scroll_Ceiling:
 			for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
+			{
 				new DScroller (DScroller::sc_ceiling, -dx, dy, control, s, accel);
+			}
+			for(unsigned j = 0;j < copyscrollers.Size(); j++)
+			{
+				line_t *line = &lines[copyscrollers[j]];
+
+				if (line->args[0] == l->args[0] && (line->args[1] & 1))
+				{
+					new DScroller (DScroller::sc_ceiling, -dx, dy, control, int(line->frontsector-sectors), accel);
+				}
+			}
 			break;
 
 		case Scroll_Floor:
 			if (l->args[2] != 1)
 			{ // scroll the floor texture
 				for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
+				{
 					new DScroller (DScroller::sc_floor, -dx, dy, control, s, accel);
+				}
+				for(unsigned j = 0;j < copyscrollers.Size(); j++)
+				{
+					line_t *line = &lines[copyscrollers[j]];
+
+					if (line->args[0] == l->args[0] && (line->args[1] & 2))
+					{
+						new DScroller (DScroller::sc_floor, -dx, dy, control, int(line->frontsector-sectors), accel);
+					}
+				}
 			}
 
 			if (l->args[2] > 0)
 			{ // carry objects on the floor
 				for (s=-1; (s = P_FindSectorFromTag (l->args[0],s)) >= 0;)
+				{
 					new DScroller (DScroller::sc_carry, dx, dy, control, s, accel);
+				}
+				for(unsigned j = 0;j < copyscrollers.Size(); j++)
+				{
+					line_t *line = &lines[copyscrollers[j]];
+
+					if (line->args[0] == l->args[0] && (line->args[1] & 4))
+					{
+						new DScroller (DScroller::sc_carry, dx, dy, control, int(line->frontsector-sectors), accel);
+					}
+				}
 			}
 			break;
 
@@ -1865,6 +1940,15 @@ DPusher::DPusher (DPusher::EPusher type, line_t *l, int magnitude, int angle,
 	}
 	m_Affectee = affectee;
 }
+
+int DPusher::CheckForSectorMatch (EPusher type, int tag)
+{
+	if (m_Type == type && sectors[m_Affectee].tag == tag)
+		return m_Affectee;
+	else
+		return -1;
+}
+
 
 /////////////////////////////
 //

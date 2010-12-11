@@ -64,7 +64,7 @@ struct RenderContext
 	bool (APIENTRY * InitHardware) (bool allowsoftware, bool nostencil, int multisample);
 #endif
 	void (APIENTRY * SwapBuffers) ();
-	bool (APIENTRY * SetFullscreen) (int w, int h, int bits, int hz);
+	bool (APIENTRY * SetFullscreen) (const char *devicename, int w, int h, int bits, int hz);
 
 
 	void (APIENTRY * Begin) (GLenum mode);
@@ -84,6 +84,7 @@ struct RenderContext
 	void (APIENTRY * Color4fv) (const GLfloat *v);
 	void (APIENTRY * Color3f) (GLfloat red, GLfloat green, GLfloat blue);
 	void (APIENTRY * Color3ub) (GLubyte red, GLubyte green, GLubyte blue);
+	void (APIENTRY * Color4ub) (GLubyte red, GLubyte green, GLubyte blue, GLubyte alpha);
 
 	void (APIENTRY * BlendEquation) (GLenum);
 	void (APIENTRY * ColorMask) (GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha);

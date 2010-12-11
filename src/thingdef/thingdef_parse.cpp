@@ -52,6 +52,9 @@
 #include "thingdef_exp.h"
 #include "w_wad.h"
 #include "v_video.h"
+#include "version.h"
+#include "v_text.h"
+#include "m_argv.h"
 
 void ParseOldDecoration(FScanner &sc, EDefinitionType def);
 
@@ -1103,6 +1106,8 @@ static FActorInfo *ParseActorHeader(FScanner &sc, Baggage *bag)
 	{
 		FActorInfo *info =  CreateNewActor(sc, typeName, parentName, native);
 		info->DoomEdNum = DoomEdNum > 0? DoomEdNum : -1;
+		info->Class->Meta.SetMetaString (ACMETA_Lump, Wads.GetLumpFullPath(sc.LumpNum));
+
 		SetReplacement(info, replaceName);
 
 		ResetBaggage (bag, info->Class->ParentClass);
@@ -1199,6 +1204,16 @@ void ParseDecorate (FScanner &sc)
 		case TK_Include:
 		{
 			sc.MustGetString();
+			// This check needs to remain overridable for testing purposes.
+			if (Wads.GetLumpFile(sc.LumpNum) == 0 && !Args->CheckParm("-allowdecoratecrossincludes"))
+			{
+				int includefile = Wads.GetLumpFile(Wads.CheckNumForFullName(sc.String, true));
+				if (includefile != 0)
+				{
+					I_FatalError("File %s is overriding core lump %s.",
+						Wads.GetWadFullName(includefile), sc.String);
+				}
+			}
 			FScanner newscanner;
 			newscanner.Open(sc.String);
 			ParseDecorate(newscanner);

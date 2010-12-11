@@ -188,6 +188,8 @@ private:
 					  fixed_t fch1, fixed_t fch2, fixed_t ffh1, fixed_t ffh2,
 					  fixed_t bch1, fixed_t bch2, fixed_t bfh1, fixed_t bfh2);
 
+	void GetPlanePos(F3DFloor::planeref *planeref, int &left, int &right);
+
 	void BuildFFBlock(seg_t * seg, F3DFloor * rover,
 					  fixed_t ff_topleft, fixed_t ff_topright, 
 					  fixed_t ff_bottomleft, fixed_t ff_bottomright);
@@ -201,10 +203,8 @@ private:
 					  fixed_t fch1, fixed_t fch2, fixed_t ffh1, fixed_t ffh2,
 					  fixed_t bch1, fixed_t bch2, fixed_t bfh1, fixed_t bfh2);
 
-	void DrawDecal(DBaseDecal *actor, seg_t *seg, sector_t *frontSector, sector_t *backSector);
-	void DoDrawDecals(DBaseDecal * decal, seg_t * seg);
-	void ProcessOneDecal(seg_t *seg, DBaseDecal * decal, float leftxfrac,float rightxfrac);
-	void ProcessDecals(seg_t *seg, float leftxfrac,float rightxfrac);
+	void DrawDecal(DBaseDecal *actor);
+	void DoDrawDecals();
 
 	void RenderFogBoundary();
 	void RenderMirrorSurface();
@@ -217,8 +217,8 @@ private:
 
 public:
 
-	void Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, subsector_t * polysub);
-	void ProcessLowerMiniseg(seg_t *seg, sector_t * frontsector, sector_t * backsector);
+	void Process(seg_t *seg, sector_t *frontsector, sector_t *backsector);
+	void ProcessLowerMiniseg(seg_t *seg, sector_t *frontsector, sector_t *backsector);
 	void Draw(int pass);
 
 	float PointOnSide(float x,float y)
@@ -276,7 +276,7 @@ public:
 	void DrawSubsectors(int pass, bool istrans);
 
 	void PutFlat(bool fog = false);
-	void Process(sector_t * sector, int whichplane, bool notexture);
+	void Process(sector_t * model, int whichplane, bool notexture);
 	void SetFrom3DFloor(F3DFloor *rover, bool top, bool underside);
 	void ProcessSector(sector_t * frontsector, subsector_t * sub);
 	void Draw(int pass);

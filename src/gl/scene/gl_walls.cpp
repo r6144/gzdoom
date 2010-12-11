@@ -157,12 +157,18 @@ void GLWall::PutWall(bool translucent)
 		{
 			if (gl_lights && !gl_dynlight_shader)
 			{
-				if (!seg->bPolySeg)
+				if (seg->sidedef == NULL)
 				{
-					light = (seg->sidedef != NULL && seg->sidedef->lighthead[0] != NULL);
+					light = false;
+				}
+				else if (!(seg->sidedef->Flags & WALLF_POLYOBJ))
+				{
+					light = seg->sidedef->lighthead[0] != NULL;
 				}
 				else if (sub)
 				{
+					// for polyobjects we cannot use the side's light list. 
+					// We must use the subsector's.
 					light = sub->lighthead[0] != NULL;
 				}
 			}
@@ -1179,6 +1185,30 @@ void GLWall::BuildFFBlock(seg_t * seg, F3DFloor * rover,
 	flags&=~GLT_CLAMPY;
 }
 
+
+//==========================================================================
+//
+// 
+//
+//==========================================================================
+
+__forceinline void GLWall::GetPlanePos(F3DFloor::planeref *planeref, int &left, int &right)
+{
+	if (planeref->plane->a | planeref->plane->b)
+	{
+		left=planeref->plane->ZatPoint(vertexes[0]);
+		right=planeref->plane->ZatPoint(vertexes[1]);
+	}
+	else if(planeref->isceiling == sector_t::ceiling)
+	{
+		left = right = planeref->plane->d;
+	}
+	else
+	{
+		left = right = -planeref->plane->d;
+	}
+}
+
 //==========================================================================
 //
 // 
@@ -1202,25 +1232,8 @@ void GLWall::InverseFloors(seg_t * seg, sector_t * frontsector,
 		fixed_t ff_bottomleft;
 		fixed_t ff_bottomright;
 
-		if (rover->top.plane->a | rover->top.plane->b)
-		{
-			ff_topleft=rover->top.plane->ZatPoint(vertexes[0]);
-			ff_topright=rover->top.plane->ZatPoint(vertexes[1]);
-		}
-		else
-		{
-			ff_topleft = ff_topright = *rover->top.texheight;
-		}
-
-		if (rover->bottom.plane->a | rover->bottom.plane->b)
-		{
-			ff_bottomleft=rover->bottom.plane->ZatPoint(vertexes[0]);
-			ff_bottomright=rover->bottom.plane->ZatPoint(vertexes[1]);
-		}
-		else
-		{
-			ff_bottomleft = ff_bottomright = *rover->bottom.texheight;
-		}
+		GetPlanePos(&rover->top, ff_topleft, ff_topright);
+		GetPlanePos(&rover->bottom, ff_bottomleft, ff_bottomright);
 
 		// above ceiling
 		if (ff_bottomleft>topleft && ff_bottomright>topright) continue;
@@ -1272,31 +1285,15 @@ void GLWall::ClipFFloors(seg_t * seg, F3DFloor * ffloor, sector_t * frontsector,
 		fixed_t ff_bottomleft;
 		fixed_t ff_bottomright;
 
-		if (rover->top.plane->a | rover->top.plane->b)
-		{
-			ff_topleft=rover->top.plane->ZatPoint(vertexes[0]);
-			ff_topright=rover->top.plane->ZatPoint(vertexes[1]);
-		}
-		else
-		{
-			ff_topleft = ff_topright = *rover->top.texheight;
-		}
+		GetPlanePos(&rover->top, ff_topleft, ff_topright);
 
 		// we are completely below the bottom so unless there are some
 		// (unsupported) intersections there won't be any more floors that
 		// could clip this one.
 		if (ff_topleft<bottomleft && ff_topright<bottomright) goto done;
 
-		if (rover->bottom.plane->a | rover->bottom.plane->b)
-		{
-			ff_bottomleft=rover->bottom.plane->ZatPoint(vertexes[0]);
-			ff_bottomright=rover->bottom.plane->ZatPoint(vertexes[1]);
-		}
-		else
-		{
-			ff_bottomleft = ff_bottomright = *rover->bottom.texheight;
-		}
-		// above top line
+		GetPlanePos(&rover->bottom, ff_bottomleft, ff_bottomright);
+		// above top line?
 		if (ff_bottomleft>topleft && ff_bottomright>topright) continue;
 
 		// overlapping the top line
@@ -1386,26 +1383,8 @@ void GLWall::DoFFloorBlocks(seg_t * seg,sector_t * frontsector,sector_t * backse
 		fixed_t ff_bottomleft;
 		fixed_t ff_bottomright;
 
-		if (rover->top.plane->a | rover->top.plane->b)
-		{
-			ff_topleft=rover->top.plane->ZatPoint(vertexes[0]);
-			ff_topright=rover->top.plane->ZatPoint(vertexes[1]);
-		}
-		else
-		{
-			ff_topleft = ff_topright = *rover->top.texheight;
-		}
-
-		if (rover->bottom.plane->a | rover->bottom.plane->b)
-		{
-			ff_bottomleft=rover->bottom.plane->ZatPoint(vertexes[0]);
-			ff_bottomright=rover->bottom.plane->ZatPoint(vertexes[1]);
-		}
-		else
-		{
-			ff_bottomleft = ff_bottomright = *rover->bottom.texheight;
-		}
-
+		GetPlanePos(&rover->top, ff_topleft, ff_topright);
+		GetPlanePos(&rover->bottom, ff_bottomleft, ff_bottomright);
 
 		// completely above ceiling
 		if (ff_bottomleft>topleft && ff_bottomright>topright && !renderedsomething) continue;
@@ -1447,7 +1426,7 @@ void GLWall::DoFFloorBlocks(seg_t * seg,sector_t * frontsector,sector_t * backse
 // 
 //
 //==========================================================================
-void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, subsector_t * polysub)
+void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector)
 {
 	vertex_t * v1, * v2;
 	fixed_t fch1;
@@ -1459,15 +1438,16 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, 
 
 #ifdef _MSC_VER
 #ifdef _DEBUG
-	if (seg->linedef-lines==7013)
+	if (seg->linedef-lines==8)
 		__asm nop
 #endif
 #endif
+		
+	// note: we always have a valid sidedef and linedef reference when getting here.
 
-	this->seg=seg;
-	this->sub=polysub ? polysub : seg->Subsector;
+	this->seg = seg;
 
-	if (polysub && seg->backsector)
+	if ((seg->sidedef->Flags & WALLF_POLYOBJ) && seg->backsector)
 	{
 		// Textures on 2-sided polyobjects are aligned to the actual seg's sectors
 		realfront = seg->frontsector;
@@ -1490,14 +1470,33 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, 
 		v1=seg->linedef->v2;
 		v2=seg->linedef->v1;
 	}
-	glseg.fracleft=0;
-	glseg.fracright=1;
 
-	if (gl_seamless)
+	if (!(seg->sidedef->Flags & WALLF_POLYOBJ))
 	{
-		if (v1->dirty) gl_RecalcVertexHeights(v1);
-		if (v2->dirty) gl_RecalcVertexHeights(v2);
+		glseg.fracleft=0;
+		glseg.fracright=1;
+		if (gl_seamless)
+		{
+			if (v1->dirty) gl_RecalcVertexHeights(v1);
+			if (v2->dirty) gl_RecalcVertexHeights(v2);
+		}
 	}
+	else	// polyobjects must be rendered per seg.
+	{
+		if (abs(v1->x-v2->x) > abs(v1->y-v2->y))
+		{
+			glseg.fracleft = float(seg->v1->x - v1->x)/float(v2->x-v1->x);
+			glseg.fracright = float(seg->v2->x - v1->x)/float(v2->x-v1->x);
+		}
+		else
+		{
+			glseg.fracleft = float(seg->v1->y - v1->y)/float(v2->y-v1->y);
+			glseg.fracright = float(seg->v2->y - v1->y)/float(v2->y-v1->y);
+		}
+		v1=seg->v1;
+		v2=seg->v2;
+	}
+
 
 	vertexes[0]=v1;
 	vertexes[1]=v2;
@@ -1509,15 +1508,9 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, 
 	Colormap=frontsector->ColorMap;
 	flags = (!gl_isBlack(Colormap.FadeColor) || level.flags&LEVEL_HASFADETABLE)? GLWF_FOGGY : 0;
 
-	lightlevel = seg->sidedef->GetLightLevel(true, frontsector->lightlevel);
-
-	if (lightlevel<255 && gl_fakecontrast && !(flags&GLWF_FOGGY))
-	{
-		// In GL it's preferable to use the relative light for fake contrast instead of
-		// altering the base light level which is also used to set fog density.
-		rellight = seg->sidedef->GetLightLevel(false, frontsector->lightlevel) - lightlevel;
-	}
-	else rellight=0;
+	int rel = 0;
+	lightlevel = seg->sidedef->GetLightLevel(!!(flags&GLWF_FOGGY), frontsector->lightlevel, &rel);
+	rellight = rel;
 
 	alpha=1.0f;
 	RenderStyle=STYLE_Normal;
@@ -1643,7 +1636,7 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, 
 							fch1,fch2,bch1a,bch2a,0);
 					}
 				}
-				else
+				else if (!(seg->sidedef->Flags & WALLF_POLYOBJ))
 				{
 					gl_drawinfo->AddUpperMissingTexture(seg, bch1a);
 				}
@@ -1652,12 +1645,7 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, 
 
 
 		/* mid texture */
-
-		// in all other cases this might create more problems than it solves.
-		bool drawfogboundary=((frontsector->ColorMap->Fade&0xffffff)!=0 && 
-							(backsector->ColorMap->Fade&0xffffff)==0 &&
-							!gl_fixedcolormap &&
-							(frontsector->GetTexture(sector_t::ceiling)!=skyflatnum || backsector->GetTexture(sector_t::ceiling)!=skyflatnum));
+		bool drawfogboundary = gl_CheckFog(frontsector, backsector);
 
 		gltexture=FMaterial::ValidateTexture(seg->sidedef->GetTexture(side_t::mid), true);
 		if (gltexture || drawfogboundary)
@@ -1670,51 +1658,46 @@ void GLWall::Process(seg_t *seg, sector_t * frontsector, sector_t * backsector, 
 			DoFFloorBlocks(seg,frontsector,backsector, fch1, fch2, ffh1, ffh2, bch1, bch2, bfh1, bfh2);
 		}
 		
-		if (1)//!((frontsector->GetTexture(sector_t::floor)==skyflatnum) && (backsector->GetTexture(sector_t::floor)==skyflatnum)))
+		/* bottom texture */
+		// the back sector's ceiling obstructs part of this wall (specially important for sky sectors)
+		if (fch1<bfh1 && fch2<bfh2)
 		{
-			/* bottom texture */
-			if (frontsector->GetTexture(sector_t::ceiling)!=skyflatnum || backsector->GetTexture(sector_t::ceiling)!=skyflatnum)
-			{
-				// the back sector's ceiling obstructs part of this wall				
-				if (fch1<bfh1 && fch2<bfh2)
-				{
-					bfh1=fch1;
-					bfh2=fch2;
-				}
-			}
+			bfh1=fch1;
+			bfh2=fch2;
+		}
 
-			if (bfh1>ffh1 || bfh2>ffh2)
+		if (bfh1>ffh1 || bfh2>ffh2)
+		{
+			gltexture=FMaterial::ValidateTexture(seg->sidedef->GetTexture(side_t::bottom), true);
+			if (gltexture) 
 			{
-				gltexture=FMaterial::ValidateTexture(seg->sidedef->GetTexture(side_t::bottom), true);
-				if (gltexture) 
+				DoTexture(RENDERWALL_BOTTOM,seg,(seg->linedef->flags & ML_DONTPEGBOTTOM)>0,
+					realback->GetPlaneTexZ(sector_t::floor),realfront->GetPlaneTexZ(sector_t::floor),
+					bfh1,bfh2,ffh1,ffh2,
+					frontsector->GetTexture(sector_t::ceiling)==skyflatnum && backsector->GetTexture(sector_t::ceiling)==skyflatnum ?
+						realfront->GetPlaneTexZ(sector_t::floor)-realback->GetPlaneTexZ(sector_t::ceiling) : 
+						realfront->GetPlaneTexZ(sector_t::floor)-realfront->GetPlaneTexZ(sector_t::ceiling));
+			}
+			else if ((frontsector->floorplane.a | frontsector->floorplane.b | 
+					backsector->floorplane.a | backsector->floorplane.b) && 
+					frontsector->GetTexture(sector_t::floor)!=skyflatnum &&
+					backsector->GetTexture(sector_t::floor)!=skyflatnum)
+			{
+				// render it anyway with the sector's floor texture. With a background sky
+				// there are ugly holes otherwise and slopes are simply not precise enough
+				// to mach in any case.
+				gltexture=FMaterial::ValidateTexture(frontsector->GetTexture(sector_t::floor), true);
+				if (gltexture)
 				{
 					DoTexture(RENDERWALL_BOTTOM,seg,(seg->linedef->flags & ML_DONTPEGBOTTOM)>0,
 						realback->GetPlaneTexZ(sector_t::floor),realfront->GetPlaneTexZ(sector_t::floor),
-						bfh1,bfh2,ffh1,ffh2,
-						frontsector->GetTexture(sector_t::ceiling)==skyflatnum && backsector->GetTexture(sector_t::ceiling)==skyflatnum ?
-							realfront->GetPlaneTexZ(sector_t::floor)-realback->GetPlaneTexZ(sector_t::ceiling) : 
-							realfront->GetPlaneTexZ(sector_t::floor)-realfront->GetPlaneTexZ(sector_t::ceiling));
+						bfh1,bfh2,ffh1,ffh2, realfront->GetPlaneTexZ(sector_t::floor)-realfront->GetPlaneTexZ(sector_t::ceiling));
 				}
-				else if ((frontsector->floorplane.a | frontsector->floorplane.b | 
-						backsector->floorplane.a | backsector->floorplane.b) && 
-						frontsector->GetTexture(sector_t::floor)!=skyflatnum &&
-						backsector->GetTexture(sector_t::floor)!=skyflatnum)
-				{
-					// render it anyway with the sector's floor texture. With a background sky
-					// there are ugly holes otherwise and slopes are simply not precise enough
-					// to mach in any case.
-					gltexture=FMaterial::ValidateTexture(frontsector->GetTexture(sector_t::floor), true);
-					if (gltexture)
-					{
-						DoTexture(RENDERWALL_BOTTOM,seg,(seg->linedef->flags & ML_DONTPEGBOTTOM)>0,
-							realback->GetPlaneTexZ(sector_t::floor),realfront->GetPlaneTexZ(sector_t::floor),
-							bfh1,bfh2,ffh1,ffh2, realfront->GetPlaneTexZ(sector_t::floor)-realfront->GetPlaneTexZ(sector_t::ceiling));
-					}
-				}
-				else if (backsector->GetTexture(sector_t::floor)!=skyflatnum)
-				{
-					gl_drawinfo->AddLowerMissingTexture(seg, bfh1);
-				}
+			}
+			else if (backsector->GetTexture(sector_t::floor)!=skyflatnum && 
+				!(seg->sidedef->Flags & WALLF_POLYOBJ))
+			{
+				gl_drawinfo->AddLowerMissingTexture(seg, bfh1);
 			}
 		}
 	}

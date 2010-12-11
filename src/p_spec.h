@@ -122,13 +122,7 @@ public:
 	DPusher ();
 	DPusher (EPusher type, line_t *l, int magnitude, int angle, AActor *source, int affectee);
 	void Serialize (FArchive &arc);
-	int CheckForSectorMatch (EPusher type, int tag)
-	{
-		if (m_Type == type && sectors[m_Affectee].tag == tag)
-			return m_Affectee;
-		else
-			return -1;
-	}
+	int CheckForSectorMatch (EPusher type, int tag);
 	void ChangeValues (int magnitude, int angle)
 	{
 		angle_t ang = ((angle_t)(angle<<24)) >> ANGLETOFINESHIFT;
@@ -186,6 +180,8 @@ void 	P_PlayerInSpecialSector (player_t *player, sector_t * sector=NULL);
 void	P_PlayerOnSpecialFlat (player_t *player, int floorType);
 
 void	P_SetSectorFriction (int tag, int amount, bool alterFlag);
+
+void P_GiveSecret(AActor *actor, bool printmessage, bool playsound);
 
 //
 // getSide()
@@ -640,6 +636,7 @@ protected:
 	};
 	int m_Speed;
 	int m_Delay;
+	bool m_SetBlocking1, m_SetBlocking2;
 
 	friend bool EV_SlidingDoor (line_t *line, AActor *thing, int tag, int speed, int delay);
 private:

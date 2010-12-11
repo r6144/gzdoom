@@ -68,7 +68,6 @@
 #include "m_png.h"
 #include "m_random.h"
 #include "version.h"
-#include "m_menu.h"
 #include "statnums.h"
 #include "sbarinfo.h"
 #include "r_translate.h"
@@ -78,27 +77,20 @@
 #include "d_net.h"
 #include "d_netinf.h"
 #include "v_palette.h"
+#include "menu/menu.h"
 
 #include "gi.h"
 
 #include "g_hub.h"
 
+void STAT_StartNewGame(const char *lev);
+void STAT_ChangeLevel(const char *newl);
 
-#ifndef STAT
-#define STAT_NEW(map)
-#define STAT_END(newl)
-#define STAT_READ(png)
-#define STAT_WRITE(f)
-#else
-void STAT_NEW(const char *lev);
-void STAT_END(const char *newl);
-void STAT_READ(PNGHandle *png);
-void STAT_WRITE(FILE *f);
-#endif
 
 EXTERN_CVAR (Float, sv_gravity)
 EXTERN_CVAR (Float, sv_aircontrol)
 EXTERN_CVAR (Int, disableautosave)
+EXTERN_CVAR (String, playerclass)
 
 #define SNAP_ID			MAKE_ID('s','n','A','p')
 #define DSNP_ID			MAKE_ID('d','s','N','p')
@@ -226,6 +218,15 @@ void G_DeferedInitNew (const char *mapname, int newskill)
 {
 	d_mapname = mapname;
 	d_skill = newskill;
+	CheckWarpTransMap (d_mapname, true);
+	gameaction = ga_newgame2;
+}
+
+void G_DeferedInitNew (FGameStartup *gs)
+{
+	if (gs->PlayerClass != NULL) playerclass = gs->PlayerClass;
+	d_mapname = AllEpisodes[gs->Episode].mEpisodeMap;
+	d_skill = gs->Skill;
 	CheckWarpTransMap (d_mapname, true);
 	gameaction = ga_newgame2;
 }
@@ -419,15 +420,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 		int cstype = SBarInfoScript[SCRIPT_CUSTOM]->GetGameType();
 
 		//Did the user specify a "base"
-		if(cstype == GAME_Heretic)
-		{
-			StatusBar = CreateHereticStatusBar();
-		}
-		else if(cstype == GAME_Hexen)
-		{
-			StatusBar = CreateHexenStatusBar();
-		}
-		else if(cstype == GAME_Strife)
+		if(cstype == GAME_Strife)
 		{
 			StatusBar = CreateStrifeStatusBar();
 		}
@@ -442,17 +435,9 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 	}
 	if (StatusBar == NULL)
 	{
-		if (gameinfo.gametype & GAME_DoomChex)
+		if (gameinfo.gametype & (GAME_DoomChex|GAME_Heretic|GAME_Hexen))
 		{
 			StatusBar = CreateCustomStatusBar (SCRIPT_DEFAULT);
-		}
-		else if (gameinfo.gametype == GAME_Heretic)
-		{
-			StatusBar = CreateHereticStatusBar ();
-		}
-		else if (gameinfo.gametype == GAME_Hexen)
-		{
-			StatusBar = CreateHexenStatusBar ();
 		}
 		else if (gameinfo.gametype == GAME_Strife)
 		{
@@ -508,7 +493,7 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 		for (i = 0; i < MAXPLAYERS; i++)
 			players[i].playerstate = PST_ENTER;	// [BC]
 
-		STAT_NEW(mapname);
+		STAT_StartNewGame(mapname);
 	}
 
 	usergame = !bTitleLevel;		// will be set false if a demo
@@ -545,10 +530,8 @@ void G_InitNew (const char *mapname, bool bTitleLevel)
 static FString	nextlevel;
 static int		startpos;	// [RH] Support for multiple starts per level
 extern int		NoWipe;		// [RH] Don't wipe when travelling in hubs
-static bool		startkeepfacing;	// [RH] Support for keeping your facing angle
-static bool		resetinventory;	// Reset the inventory to the player's default for the next level
+static int		changeflags;
 static bool		unloading;
-static bool		g_nomonsters;
 
 //==========================================================================
 //
@@ -559,8 +542,7 @@ static bool		g_nomonsters;
 //==========================================================================
 
 
-void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nextSkill, 
-				   bool nointermission, bool resetinv, bool nomonsters)
+void G_ChangeLevel(const char *levelname, int position, int flags, int nextSkill)
 {
 	level_info_t *nextinfo = NULL;
 
@@ -589,25 +571,32 @@ void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nex
 	if (nextSkill != -1)
 		NextSkill = nextSkill;
 
-	g_nomonsters = nomonsters;
-
-	if (nointermission) level.flags |= LEVEL_NOINTERMISSION;
+	if (flags & CHANGELEVEL_NOINTERMISSION)
+	{
+		level.flags |= LEVEL_NOINTERMISSION;
+	}
 
 	cluster_info_t *thiscluster = FindClusterInfo (level.cluster);
 	cluster_info_t *nextcluster = nextinfo? FindClusterInfo (nextinfo->cluster) : NULL;
 
 	startpos = position;
-	startkeepfacing = keepFacing;
 	gameaction = ga_completed;
-	resetinventory = resetinv;
 		
 	if (nextinfo != NULL) 
 	{
 		if (thiscluster != nextcluster || (thiscluster && !(thiscluster->flags & CLUSTER_HUB)))
 		{
-			resetinventory |= !!(nextinfo->flags2 & LEVEL2_RESETINVENTORY);
+			if (nextinfo->flags2 & LEVEL2_RESETINVENTORY)
+			{
+				flags |= CHANGELEVEL_RESETINVENTORY;
+			}
+			if (nextinfo->flags2 & LEVEL2_RESETHEALTH)
+			{
+				flags |= CHANGELEVEL_RESETHEALTH;
+			}
 		}
 	}
+	changeflags = flags;
 
 	bglobal.End();	//Added by MC:
 
@@ -616,7 +605,7 @@ void G_ChangeLevel(const char *levelname, int position, bool keepFacing, int nex
 	FBehavior::StaticStartTypedScripts (SCRIPT_Unloading, NULL, false, 0, true);
 	unloading = false;
 
-	STAT_END(nextlevel);
+	STAT_ChangeLevel(nextlevel);
 
 	if (thiscluster && (thiscluster->flags & CLUSTER_HUB))
 	{
@@ -683,12 +672,12 @@ const char *G_GetSecretExitMap()
 
 void G_ExitLevel (int position, bool keepFacing)
 {
-	G_ChangeLevel(G_GetExitMap(), position, keepFacing);
+	G_ChangeLevel(G_GetExitMap(), position, keepFacing ? CHANGELEVEL_KEEPFACING : 0);
 }
 
 void G_SecretExitLevel (int position) 
 {
-	G_ChangeLevel(G_GetSecretExitMap(), position, false);
+	G_ChangeLevel(G_GetSecretExitMap(), position, 0);
 }
 
 //==========================================================================
@@ -802,7 +791,7 @@ void G_DoCompleted (void)
 	{
 		if (playeringame[i])
 		{ // take away appropriate inventory
-			G_PlayerFinishLevel (i, mode, resetinventory);
+			G_PlayerFinishLevel (i, mode, changeflags);
 		}
 	}
 
@@ -943,7 +932,7 @@ void G_DoLoadLevel (int position, bool autosave)
 			players[i].fragcount = 0;
 	}
 
-	if (g_nomonsters)
+	if (changeflags & CHANGELEVEL_NOMONSTERS)
 	{
 		level.flags2 |= LEVEL2_NOMONSTERS;
 	}
@@ -1180,7 +1169,7 @@ void G_FinishTravel ()
 			// The player being spawned here is a short lived dummy and
 			// must not start any ENTER script or big problems will happen.
 			pawndup = P_SpawnPlayer (&playerstarts[pawn->player - players], true);
-			if (!startkeepfacing)
+			if (!changeflags & CHANGELEVEL_KEEPFACING)
 			{
 				pawn->angle = pawndup->angle;
 				pawn->pitch = pawndup->pitch;
@@ -1319,6 +1308,8 @@ void G_InitLevelLocals ()
 	compatflags.Callback();
 
 	NormalLight.ChangeFade (level.fadeto);
+
+	level.DefaultEnvironment = info->DefaultEnvironment;
 }
 
 //==========================================================================
@@ -1474,8 +1465,8 @@ void G_SerializeLevel (FArchive &arc, bool hubLoad)
 	P_SerializeThinkers (arc, hubLoad);
 	P_SerializeWorld (arc);
 	P_SerializePolyobjs (arc);
+	P_SerializeSubsectors(arc);
 	StatusBar->Serialize (arc);
-	//SerializeInterpolations (arc);
 
 	arc << level.total_monsters << level.total_items << level.total_secrets;
 
@@ -1652,7 +1643,6 @@ void G_WriteSnapshots (FILE *file)
 {
 	unsigned int i;
 
-	STAT_WRITE(file);
 	for (i = 0; i < wadlevelinfos.Size(); i++)
 	{
 		if (wadlevelinfos[i].snapshot)
@@ -1803,7 +1793,6 @@ void G_ReadSnapshots (PNGHandle *png)
 			arc << pnum;
 		}
 	}
-	STAT_READ(png);
 	png->File->ResetFilePtr();
 }
 
