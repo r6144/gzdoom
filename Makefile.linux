@@ -31,9 +31,9 @@ LDFLAGS += -lz $(FMOD_PREFIX)/lib/libfmodex${X64}.so `sdl-config --libs`
 LDFLAGS += -ljpeg `pkg-config gtk+-2.0 --libs`
 LDFLAGS += -lGL -lGLU
 NASMFLAGS += -f elf -DM_TARGET_LINUX
+NOSTRIP = 1
 
 ifdef VALGRIND
-  NOSTRIP = 1
   NASMFLAGS += -DVALGRIND_AWARE
 endif
 

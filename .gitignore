@@ -1,0 +1,10 @@
+zdoom
+zdoom.map
+*.pk3
+releaseobj
+ccdv
+*.orig
+generated
+CMakeFiles
+Makefile
+cmake_install.cmake

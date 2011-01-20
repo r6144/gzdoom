@@ -423,7 +423,7 @@ static void APIENTRY LoadExtensions()
 		gl->flags|=RFL_MAP_BUFFER_RANGE;
 	}
 
-	if (CheckExtension("GL_ARB_framebuffer_object"))
+	if (0 && CheckExtension("GL_ARB_framebuffer_object"))
 	{
 		gl->GenFramebuffers			= (PFNGLGENFRAMEBUFFERSPROC)wglGetProcAddress("glGenFramebuffers");
 		gl->DeleteFramebuffers		= (PFNGLDELETEFRAMEBUFFERSPROC)wglGetProcAddress("glDeleteFramebuffers");
