@@ -141,6 +141,9 @@ static const char *BaseFileSearch (const char *file, const char *ext, bool lookf
 
 EXTERN_CVAR (Float, turbo)
 EXTERN_CVAR (Int, damage_divisor)
+EXTERN_CVAR (Bool, player_alt_dmg_enabled)
+EXTERN_CVAR (Float, player_alt_dmg_a)
+EXTERN_CVAR (Float, player_alt_dmg_tau)
 EXTERN_CVAR (Int, crosshair)
 EXTERN_CVAR (Bool, freelook)
 EXTERN_CVAR (Float, m_pitch)
@@ -2044,6 +2047,14 @@ void D_DoomMain (void)
 	{ // easiness option
 		damage_divisor = atoi(v);
 		Printf ("damage divisor: %d\n", (int) damage_divisor);
+	}
+
+	v = Args->CheckValue("-alteasy");
+	if (v != NULL)
+	{ // easiness option
+		player_alt_dmg_a = atof(v);
+		player_alt_dmg_enabled = true;
+		Printf ("player_alt_dmg_a: %0.2f\n", (double) player_alt_dmg_a);
 	}
 
 	v = Args->CheckValue ("-timer");

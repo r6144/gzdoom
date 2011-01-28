@@ -65,6 +65,12 @@ static player_t PredictionPlayerBackup;
 static BYTE PredictionActorBackup[sizeof(AActor)];
 static TArray<sector_t *> PredictionTouchingSectorsBackup;
 
+// Roughly speaking, when player_alt_dmg_enabled is true, damage exceeding player_alt_dmg_a within player_alt_dmg_tau seconds
+// will be significantly reduced.
+CVAR (Bool, player_alt_dmg_enabled, false, CVAR_DEMOSAVE)
+CVAR (Float, player_alt_dmg_a, 10.0, CVAR_DEMOSAVE)
+CVAR (Float, player_alt_dmg_tau, 3.0, CVAR_DEMOSAVE)
+
 // [GRB] Custom player classes
 TArray<FPlayerClass> PlayerClasses;
 
@@ -300,8 +306,9 @@ player_t::player_t()
   ConversationPC(0),
   ConversationNPCAngle(0),
   ConversationFaceTalker(0),
-  alt_dmg_a(10.0),
-  alt_dmg_k(0.01),
+  alt_dmg_enabled(player_alt_dmg_enabled),
+  alt_dmg_a(player_alt_dmg_a),
+  alt_dmg_k(1.0 / (player_alt_dmg_tau * TICRATE)),
   alt_dmg_x_gametic(0),
   alt_dmg_x(alt_dmg_a),
   residual_damage(0.0)

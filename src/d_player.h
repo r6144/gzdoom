@@ -394,6 +394,7 @@ public:
 
 	// For use by alt_adjust_damage
 	// FIXME: Should use fixed-point arithmetic (including logarithm) in order to ensure demo portability across platforms
+	bool alt_dmg_enabled;
 	double alt_dmg_a, alt_dmg_k; // parameters
 	int alt_dmg_x_gametic; // alt_dmg_x is current as of alt_dmg_x_gametic
 	double alt_dmg_x;

@@ -72,7 +72,7 @@ CVAR (Bool, cl_showsprees, true, CVAR_ARCHIVE)
 CVAR (Bool, cl_showmultikills, true, CVAR_ARCHIVE)
 EXTERN_CVAR (Bool, show_obituaries)
 
-CVAR (Int, damage_divisor, 1, 0)
+CVAR (Int, damage_divisor, 1, CVAR_DEMOSAVE)
 
 FName MeansOfDeath;
 bool FriendlyFire;
@@ -866,9 +866,6 @@ static int divide_damage(int damage)
 
 static int adjust_damage(player_t *player, int raw_damage)
 {
-#if 0
-	return divide_damage(raw_damage);
-#else
 	if (raw_damage < 0) return raw_damage; // just in case we are healed by something
 	else {
 		const double a = player->alt_dmg_a;
@@ -879,16 +876,18 @@ static int adjust_damage(player_t *player, int raw_damage)
 			player->alt_dmg_x = a + (player->alt_dmg_x - a) * exp(-player->alt_dmg_k * delta);
 			player->alt_dmg_x_gametic = cur_gametic;
 		}
-		double cur_damage = a * log(1.0 + (double) raw_damage / player->alt_dmg_x);
-		printf("delta=%d x=%0.2f raw_dmg=%d adj_dmg=%0.2f rate=%0.4f\n",
-			   delta, player->alt_dmg_x, raw_damage, cur_damage, cur_damage / raw_damage);
-		player->alt_dmg_x += raw_damage;
+		double cur_damage;
+		if (player->alt_dmg_enabled) {
+			cur_damage = a * log(1.0 + (double) raw_damage / player->alt_dmg_x);
+			printf("delta=%d x=%0.2f raw_dmg=%d adj_dmg=%0.2f rate=%0.4f\n",
+				   delta, player->alt_dmg_x, raw_damage, cur_damage, cur_damage / raw_damage);
+			player->alt_dmg_x += raw_damage;
+		} else cur_damage = raw_damage;
 		player->residual_damage += cur_damage;
 		int idamage = (int) floor(player->residual_damage);
 		player->residual_damage -= idamage;
-		return idamage;
+		return divide_damage(idamage); // damage_divisor is applied afterwards for backwards compatibility
 	}
-#endif
 }
 
 /*
