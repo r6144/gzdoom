@@ -299,7 +299,12 @@ player_t::player_t()
   ConversationNPC(0),
   ConversationPC(0),
   ConversationNPCAngle(0),
-  ConversationFaceTalker(0)
+  ConversationFaceTalker(0),
+  alt_dmg_a(10.0),
+  alt_dmg_k(0.01),
+  alt_dmg_x_gametic(0),
+  alt_dmg_x(alt_dmg_a),
+  residual_damage(0.0)
 {
 	memset (&cmd, 0, sizeof(cmd));
 	memset (&userinfo, 0, sizeof(userinfo));

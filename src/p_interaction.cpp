@@ -58,6 +58,7 @@
 #include "g_level.h"
 #include "d_net.h"
 #include "d_netinf.h"
+#include <math.h>
 
 static FRandom pr_obituary ("Obituary");
 static FRandom pr_botrespawn ("BotRespawn");
@@ -863,6 +864,33 @@ static int divide_damage(int damage)
 	return damage;
 }
 
+static int adjust_damage(player_t *player, int raw_damage)
+{
+#if 0
+	return divide_damage(raw_damage);
+#else
+	if (raw_damage < 0) return raw_damage; // just in case we are healed by something
+	else {
+		const double a = player->alt_dmg_a;
+		int cur_gametic = gametic;
+		int delta = cur_gametic - player->alt_dmg_x_gametic;
+		if (delta) {
+			assert(delta >= 0);
+			player->alt_dmg_x = a + (player->alt_dmg_x - a) * exp(-player->alt_dmg_k * delta);
+			player->alt_dmg_x_gametic = cur_gametic;
+		}
+		double cur_damage = a * log(1.0 + (double) raw_damage / player->alt_dmg_x);
+		printf("delta=%d x=%0.2f raw_dmg=%d adj_dmg=%0.2f rate=%0.4f\n",
+			   delta, player->alt_dmg_x, raw_damage, cur_damage, cur_damage / raw_damage);
+		player->alt_dmg_x += raw_damage;
+		player->residual_damage += cur_damage;
+		int idamage = (int) floor(player->residual_damage);
+		player->residual_damage -= idamage;
+		return idamage;
+	}
+#endif
+}
+
 /*
 =================
 =
@@ -1106,7 +1134,7 @@ void P_DamageMobj (AActor *target, AActor *inflictor, AActor *source, int damage
 	//
 	if (player)
 	{
-		damage = divide_damage(damage); // easiness
+		damage = adjust_damage(player, damage); // easiness
 		
         //Added by MC: Lets bots look allround for enemies if they survive an ambush.
         if (player->isbot)
@@ -1513,7 +1541,7 @@ void P_PoisonDamage (player_t *player, AActor *source, int damage,
 		// Take half damage in trainer mode
 		damage = FixedMul(damage, G_SkillProperty(SKILLP_DamageFactor));
 	}
-	if (player) damage = divide_damage(damage); // easiness
+	if (player) damage = adjust_damage(player, damage); // easiness
 	if (damage >= player->health
 		&& (G_SkillProperty(SKILLP_AutoUseHealth) || deathmatch)
 		&& !player->morphTics)
